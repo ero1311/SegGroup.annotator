@@ -1,0 +1,4 @@
+annotator/node_modules
+annotator/__pycache__
+annotator/public/data/label
+annotator/public/data/scannet

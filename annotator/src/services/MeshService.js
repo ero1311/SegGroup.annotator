@@ -1,8 +1,6 @@
 import * as THREE from "three";
 import $ from "jquery";
-import configs from "../configs.json";
 
-var filenames;
 var segIndices;
 var segDicts;
 
@@ -16,13 +14,11 @@ class MeshService {
   }
 
   loadFileNames = path => {
-    filenames = [];
-    $.ajaxSettings.async = false; //必须加的，若不加返回的是""
+    let filenames;
+    $.ajaxSettings.async = false;
     $.get (path, function (data)
       {
-        for (var i = 0; i < data.length/(configs["filename_length"]+1); i++){
-          filenames.push(data.substr(i*(configs["filename_length"]+1), configs["filename_length"]));
-        }
+        filenames = data.trim().split('\n');
         filenames.sort();
       });
     return filenames;
@@ -31,7 +27,7 @@ class MeshService {
   loadSegIndices = path => {
     segIndices = [];
     segDicts = {};
-    $.ajaxSettings.async = false; //必须加的，若不加返回的是""
+    $.ajaxSettings.async = false;
     $.getJSON (path, function (data)
       {
         segIndices = data.segIndices;
@@ -73,15 +69,15 @@ class MeshService {
     return mesh_mouse;
   };
 
-  removeSegmentColor = (segId, mesh_mouse, mesh) =>{
+  removeSegmentColor = (segId, mesh_mouse, color_dict) =>{
     var dict = this.segId2Dict(segId);
     if (typeof dict !== "undefined"){
       for (var i = 0; i < dict.length; i++){
         mesh_mouse.geometry.attributes.color.setXYZ(
           dict[i], 
-          mesh.geometry.attributes.color.getX(dict[i]),
-          mesh.geometry.attributes.color.getY(dict[i]),
-          mesh.geometry.attributes.color.getZ(dict[i])
+          color_dict[i][0],
+          color_dict[i][1],
+          color_dict[i][2]
         );
       }
     }
@@ -103,16 +99,30 @@ class MeshService {
   };
 
   getSegAnnoMesh = (mesh_seg_anno, annos, color_list) => {
-    for (var i = 0; i < segIndices.length; i++){
+    /*for (var i = 0; i < segIndices.length; i++){
       mesh_seg_anno.geometry.attributes.color.setXYZ(i, 1, 1, 1);
-    }
+    }*/
     for (var insId in annos) {
       for (var segId in annos[insId]){
-        mesh_seg_anno = this.addSegmentColor(segId, mesh_seg_anno, color_list[Number(insId)]);
+        mesh_seg_anno = this.addSegmentColor(segId, mesh_seg_anno, color_list[annos[insId][segId].semantic]);
       }
     }
     return mesh_seg_anno;
   };
+
+  getSegColors = (segId, mesh_mouse) => {
+    let idx2colors = {}, dict = this.segId2Dict(segId);
+    if (typeof dict !== "undefined"){
+      for (let i=0; i < dict.length; i++){
+        idx2colors[i] = [
+          mesh_mouse.geometry.attributes.color.getX(dict[i]),
+          mesh_mouse.geometry.attributes.color.getY(dict[i]), 
+          mesh_mouse.geometry.attributes.color.getZ(dict[i])
+        ];
+      }
+    }
+    return idx2colors;
+  }
 
   getPointAnno = (mesh, annos) => {
     var pointAnnoList = [];

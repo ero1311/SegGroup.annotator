@@ -6,7 +6,7 @@ import configs from "../configs.json";
 // console.log(fs);
 
 var state;
-
+var basePath = "http://" + configs["host"] + ":" + configs["inter_port"].toString();
 // var fs = require("fs-js");
 
 class StateService {
@@ -19,7 +19,7 @@ class StateService {
   }
 
   loadState = path => {
-    $.ajaxSettings.async = false; //必须加的，若不加返回的是""
+    $.ajaxSettings.async = false;
     $.getJSON (path, function (data)
       {
         state = data;
@@ -28,24 +28,21 @@ class StateService {
   };
 
   updateState = (data) => {
-    var nbuf = "0" + data;
     var xhr = new XMLHttpRequest();
-    xhr.open("POST", "http://" + configs["host"] + ":" + configs["inter_port"].toString());
-    xhr.send(nbuf);
+    xhr.open("POST", basePath + '/update');
+    xhr.send(data);
   };
 
-  saveAnnotation = (filename, data) => {
-    var nbuf = "1" + filename + data;
+  saveAnnotation = (data) => {
     var xhr = new XMLHttpRequest();
-    xhr.open("POST", "http://" + configs["host"] + ":" + configs["inter_port"].toString());
-    xhr.send(nbuf);
+    xhr.open("POST", basePath + '/save');
+    xhr.send(data);
   };
 
   deleteAnnotation = (filename) => {
-    var nbuf = "2" + filename;
     var xhr = new XMLHttpRequest();
-    xhr.open("POST", "http://" + configs["host"] + ":" + configs["inter_port"].toString());
-    xhr.send(nbuf);
+    xhr.open("POST", basePath + '/delete');
+    xhr.send(filename);
   };
 
 }

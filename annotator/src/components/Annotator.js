@@ -30,7 +30,7 @@ semantics.sort(function(a,b){
 var selected_sem;
 var selected_sem_index = 0;
 var sem2id = {};
-for (var i = 0; i < semantics; i++){
+for (let i = 0; i < semantics; i++){
   sem2id[semantics[i].label] = semantics[i].id;
 }
 userState = stateService.loadState("./data/info.json");
@@ -46,6 +46,7 @@ var Marked = 0;
 // define variables
 var camera, controls, light, scene, stats, renderer, loader;
 var mesh, mesh_hid, mesh_mouse, mesh_overseg, mesh_seg_anno;
+var segId2Color, oversegId2Color;
 
 // initialize raycaster
 var raycaster = new THREE.Raycaster();
@@ -62,8 +63,15 @@ var insId_lastLabeled = -1;
 var labeled_segId = [];
 var labeled_sem = [];
 var current_segId = [];
-var color_list = [];
-var ins_bais = Math.floor(Math.random()*configs["labels"].length);
+var color_list = {};
+for(let i=0; i < configs["labels"].length; i++){
+  let r, g, b;
+  [r, g, b] = configs["labels"][i]["color"];
+  r = r/255;
+  g = g/255;
+  b = b/255;
+  color_list[configs["labels"][i]["label"]] = [r, g, b];
+}
 
 var mouse_insId = -1;
 var mouse_semantic = "none";
@@ -219,7 +227,6 @@ class Annotator extends Component {
         if (Marked){
           annotations = labelService.loadAnnotationJson(selected_filename);
           insNum = Object.keys(annotations).length;
-          this.UpdateColorList();
           mesh_seg_anno = meshService.getSegAnnoMesh(mesh_seg_anno, annotations, color_list);
         }
         
@@ -336,14 +343,16 @@ class Annotator extends Component {
 
         // show intersected segment in mesh
         segId_new = meshService.index2segId(pointSelectIndex);
-        if ((segId_new !== segId) && (labeled_segId.indexOf(segId_new) === -1) && (Marked === 0)){
+        if ((segId_new !== segId) && (labeled_segId.indexOf(segId_new) === -1)){
           var color = [255, 0, 0];
-          if (keySpace) {
-            mesh_mouse = meshService.removeSegmentColor(segId, mesh_mouse, mesh_overseg, color);
+          if (keySpace && oversegId2Color !== undefined) {
+            mesh_mouse = meshService.removeSegmentColor(segId, mesh_mouse, oversegId2Color);
           }
-          else {
-            mesh_mouse = meshService.removeSegmentColor(segId, mesh_mouse, mesh, color);
+          if (!keySpace && segId2Color !== undefined) {
+            mesh_mouse = meshService.removeSegmentColor(segId, mesh_mouse, segId2Color);
           }
+          oversegId2Color = meshService.getSegColors(segId_new, mesh_overseg);
+          segId2Color = meshService.getSegColors(segId_new, mesh_mouse);
           mesh_mouse = meshService.addSegmentColor(segId_new, mesh_mouse, color);
           mesh_mouse.geometry.attributes.color.needsUpdate = true;
           segId = segId_new;
@@ -374,9 +383,10 @@ class Annotator extends Component {
 
       // add annotation
       annotations = labelService.addAnnotation(insId, segId, selected_sem.label, pointSelectIndex);
-
+      let color_id = document.getElementById("jumpMenu").options[document.getElementById("jumpMenu").options.selectedIndex].value;
+      console.log(color_id);
       // update mesh
-      var color = color_list[insId];
+      var color = color_list[color_id];
       mesh = meshService.addSegmentColor(segId, mesh, color);
       mesh_overseg = meshService.addSegmentColor(segId, mesh_overseg, color);
       if (keySpace) {
@@ -433,22 +443,6 @@ class Annotator extends Component {
         break;
       case 104: // h    reset camera
         controls.reset();
-        break;
-      case 102: // f    change instance color
-        this.UpdateColorList();
-        annotations = labelService.loadAnnotationJson(selected_filename);
-        if (Marked){
-          mesh_seg_anno = meshService.changeSegmentColor(mesh_seg_anno, annotations, color_list);
-          mesh_mouse.geometry.copy(mesh_seg_anno.geometry);
-          mesh_seg_anno.geometry.attributes.color.needsUpdate = true;
-        }
-        else {
-          mesh = meshService.changeSegmentColor(mesh, annotations, color_list);
-          mesh_mouse.geometry.copy(mesh.geometry);
-          mesh.geometry.attributes.color.needsUpdate = true;
-        }
-        mesh_mouse.geometry.attributes.color.needsUpdate = true;
-        segId = -1;
         break;
       case 32: // space   show segments
         if (keySpace === 0){
@@ -515,7 +509,7 @@ class Annotator extends Component {
           mesh.geometry.copy(mesh_hid.geometry);
           for (var ins in annotations){
             for (seg in annotations[ins]){
-              mesh = meshService.addSegmentColor(Number(seg), mesh, color_list[Number(ins)]);
+              mesh = meshService.addSegmentColor(Number(seg), mesh, color_list[annotations[ins][seg].semantic]);
             }
             
           }
@@ -589,7 +583,7 @@ class Annotator extends Component {
       Marked = 0;
       IntTime = 0;
       insNum = 0;
-      color_list = [];
+      //color_list = [];
     }
 
     // initialize timer
@@ -611,34 +605,6 @@ class Annotator extends Component {
       insId++;
       insNum++;
 
-      // add instance color
-      var r, g, b;
-      if (insId < 40){
-        [r, g, b] = configs["labels"][(insId+ins_bais)%40]["color"];
-        r = r/255;
-        g = g/255;
-        b = b/255;
-      }
-      else
-        [r, g, b] = [Math.random(), Math.random(), Math.random()];
-      color_list.push([r, g, b])
-    }
-  };
-
-  UpdateColorList = () => {
-    ins_bais = Math.floor(Math.random()*configs["labels"].length);
-    var r, g, b;
-    color_list = [];
-    for (var i = 0; i <= insNum; i++){
-      if (i < configs["labels"].length){
-        [r, g, b] = configs["labels"][(i+ins_bais)%configs["labels"].length]["color"];
-        r = r/255;
-        g = g/255;
-        b = b/255;
-      }
-      else
-        [r, g, b] = [Math.random(), Math.random(), Math.random()];
-      color_list.push([r, g, b]);
     }
   };
   
@@ -646,7 +612,11 @@ class Annotator extends Component {
     if (typeof StarTime !== "undefined"){
 
       // save annotations
-      stateService.saveAnnotation(selected_filename, JSON.stringify(labelService.getAnnotation(), null, 2));
+      let save_data = {
+        file_name: selected_filename,
+        annotations: labelService.getAnnotation()
+      }
+      stateService.saveAnnotation(JSON.stringify(save_data, null, 2));
 
       // reset annotation states
       segId = -1;
@@ -657,6 +627,8 @@ class Annotator extends Component {
       labeled_segId = [];
       labeled_sem = [];
       current_segId = [];
+      segId2Color = undefined;
+      oversegId2Color = undefined;
 
       // update user states
       userState.scene_time.push(IntTime);
@@ -716,6 +688,8 @@ class Annotator extends Component {
     labeled_segId = [];
     labeled_sem = [];
     current_segId = [];
+    segId2Color = undefined;
+    oversegId2Color = undefined;
 
     // reset timer
     IntTime = 0;
@@ -774,23 +748,7 @@ class Annotator extends Component {
           className="row p-2"
           style={{ height: 0.12 * window.innerHeight }}
         >
-          <div className="col">
-            <div>
-              <b>Seg-Level Label Annotator</b>
-            </div>
-            <div>
-              <bb>Tsinghua University</bb>
-            </div>
-            <div>
-              <a
-                href="https://www.antao.site"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                An Tao
-              </a>
-            </div>
-          </div>
+          
           <div className="col">
             <div className="col alert alert-success"
             style={{
