@@ -27,22 +27,64 @@ class StateService {
     return state;
   };
 
-  updateState = (data) => {
-    var xhr = new XMLHttpRequest();
-    xhr.open("POST", basePath + '/update');
-    xhr.send(data);
+  updateState = async (data) => {
+    let response_data = await fetch(basePath + '/update', {
+      method: 'POST',
+      headers: {"Content-Type": "application/json"},
+      body: data
+    })
+    .then(async response => {
+        const data = await response.json();
+        if (!response.ok){
+          return 'Failed to save'
+        }
+        return data.message
+    })
+    .catch(error => {
+        return error.toString();
+    })
+
+    return response_data
   };
 
-  saveAnnotation = (data) => {
-    var xhr = new XMLHttpRequest();
-    xhr.open("POST", basePath + '/save');
-    xhr.send(data);
+  saveAnnotation = async (data) => {
+    let response_data = await fetch(basePath + '/save', {
+      method: 'POST',
+      headers: {"Content-Type": "application/json"},
+      body: data
+    })
+    .then(async response => {
+        const data = await response.json();
+        if (!response.ok){
+          return 'Failed to save'
+        }
+        return data.message
+    })
+    .catch(error => {
+        return error.toString();
+    })
+
+    return response_data
   };
 
-  deleteAnnotation = (filename) => {
-    var xhr = new XMLHttpRequest();
-    xhr.open("POST", basePath + '/delete');
-    xhr.send(filename);
+  deleteAnnotation = async (data) => {
+    let response_data = await fetch(basePath + '/delete', {
+      method: 'POST',
+      headers: {"Content-Type": "application/json"},
+      body: data
+    })
+    .then(async response => {
+        const data = await response.json();
+        if (!response.ok){
+          return 'Failed to delete'
+        }
+        return data.message
+    })
+    .catch(error => {
+        return error.toString();
+    })
+
+    return response_data
   };
 
 }

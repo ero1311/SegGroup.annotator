@@ -1,6 +1,8 @@
-import $ from "jquery";
+import configs from "../configs.json";
 
 var annotations = {};
+
+var basePath = "http://" + configs["host"] + ":" + configs["inter_port"].toString();
 
 class LabelService {
   static myInstance = null;
@@ -41,18 +43,22 @@ class LabelService {
     return annotations;
   };
 
-  loadAnnotationJson = (filename) => {
-    var path = "./data/label/" + filename + ".json";
-    $.ajaxSettings.async = false; //必须加的，若不加返回的是""
-    $.getJSON (path, function (data)
-      {
-        annotations = data;
+  loadAnnotationJson = async (filename) => {
+    let req_path = basePath + '/load/' + filename;
+    let result = await fetch(req_path)
+      .then(async response => {
+          const data = await response.json();
+          if(data.status !== 200){
+            return [data.message, {}]
+          }
+          return [data.message, data.data]
+      })
+      .catch(error => {
+          return [error.toString(), {}]
       });
-    if (typeof annotations === "undefined"){
-      annotations = {};
-    }
-    return annotations;
-  };
+    annotations = result[1];
+    return result
+  }
 
   getInfo = (mouse_segId) => {
     for (let className in annotations) {
