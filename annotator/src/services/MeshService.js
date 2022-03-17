@@ -1,4 +1,3 @@
-import * as THREE from "three";
 import $ from "jquery";
 
 var segIndices;
@@ -102,9 +101,9 @@ class MeshService {
     /*for (var i = 0; i < segIndices.length; i++){
       mesh_seg_anno.geometry.attributes.color.setXYZ(i, 1, 1, 1);
     }*/
-    for (var insId in annos) {
-      for (var segId in annos[insId]){
-        mesh_seg_anno = this.addSegmentColor(segId, mesh_seg_anno, color_list[annos[insId][segId].semantic]);
+    for (var className in annos) {
+      for (var i = 0; i < annos[className].length; i++){
+        mesh_seg_anno = this.addSegmentColor(annos[className][i], mesh_seg_anno, color_list[className]);
       }
     }
     return mesh_seg_anno;
@@ -123,31 +122,6 @@ class MeshService {
     }
     return idx2colors;
   }
-
-  getPointAnno = (mesh, annos) => {
-    var pointAnnoList = [];
-    for (var insId in annos) {
-      for (var segId in annos[insId]){
-        var sphereGeometry = new THREE.SphereBufferGeometry(0.04, 32, 32);
-        var sphereMaterial = new THREE.MeshBasicMaterial({ color: "#FF0000" });
-        var sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
-        sphere.position.x = mesh.geometry.attributes.position.getX(annos[insId][segId].pointIndex);
-        sphere.position.y = mesh.geometry.attributes.position.getY(annos[insId][segId].pointIndex);
-        sphere.position.z = mesh.geometry.attributes.position.getZ(annos[insId][segId].pointIndex);
-        pointAnnoList.push(sphere);
-      }
-    }
-    return pointAnnoList;
-  };
-
-  changeSegmentColor = (mesh, annos, color_list) => {
-    for (var insId in annos){
-      for (var segId in annos[insId]){
-        mesh = this.addSegmentColor(Number(segId), mesh, color_list[Number(insId)]);
-      }
-    }
-    return mesh;
-  };
 
 }
 

@@ -11,11 +11,13 @@ class LabelService {
     return this.myInstance;
   }
 
-  addAnnotation = (insId, segId, semantic, pointIndex) => {
-    if (typeof annotations[insId] === "undefined") {
-      annotations[insId] = {};
+  addAnnotation = (className, segId) => {
+    if (typeof annotations[className] === "undefined") {
+      annotations[className] = [segId];
     }
-    annotations[insId][segId] = {"semantic": semantic, "pointIndex": pointIndex};
+    else{
+      annotations[className].push(segId);
+    }
     return annotations;
   };
 
@@ -23,12 +25,13 @@ class LabelService {
     return annotations;
   };
 
-  removeAnnotation = (insId, segId) => {
-    if (typeof annotations[insId][segId] !== "undefined"){
-      delete annotations[insId][segId];
+  removeAnnotation = (className, segId) => {
+    let seg_index = annotations[className].indexOf(segId);
+    if (seg_index !== -1){
+      annotations[className].splice(seg_index, 1);
     }
-    if (JSON.stringify(annotations[insId]) === "{}"){
-      delete annotations[insId];
+    if (JSON.stringify(annotations[className]) === "[]"){
+      delete annotations[className];
     }
     return annotations;
   };
@@ -52,14 +55,12 @@ class LabelService {
   };
 
   getInfo = (mouse_segId) => {
-    for (var insId in annotations) {
-      for (var segId in annotations[insId]){
-        if (mouse_segId === Number(segId)){
-          return [insId, annotations[insId][segId].semantic];
-        }
+    for (let className in annotations) {
+      if (annotations[className].indexOf(mouse_segId) !== -1){
+        return className;
       }
     }
-    return [-1, "none"];
+    return "none";
   };
 
 }
