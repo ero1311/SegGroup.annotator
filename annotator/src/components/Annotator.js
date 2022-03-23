@@ -20,7 +20,6 @@ let meshService = MeshService.getInstance();
 let stateService = StateService.getInstance();
 
 // load user state
-var userState;
 const filenames = meshService.loadFileNames(configs["filename_path"]);
 var selected_filename;
 var semantics = configs["labels"];
@@ -32,14 +31,6 @@ var selected_sem_index = 0;
 var sem2id = {};
 for (let i = 0; i < semantics; i++){
   sem2id[semantics[i].label] = semantics[i].id;
-}
-userState = stateService.loadState("./data/info.json");
-if (userState.current_filename === "") {
-  selected_filename = filenames[0];
-  userState.current_filename = selected_filename;
-}
-else {
-  selected_filename = userState.current_filename;
 }
 var Marked = 0;
 
@@ -78,13 +69,6 @@ var remove_anno = 0;
 
 const datasetFolder = configs["dataset_folder"];
 
-// initialize timer
-var StarTime, EndTime;
-var IntTime = 0;
-var IntTimePast = 0;
-var timeButton = ["Stop Timer", "Continue Timer"];
-var timeButtonState = 0;
-
 // initialize annotation
 var annotations = {};
 
@@ -100,11 +84,11 @@ class Annotator extends Component {
 
   componentDidMount() {
     this.init();
-
     this.animate();
   }
 
   init = () => {
+    selected_filename = filenames[0];
     $(".alert-success").hide();
 
     const width = 0.84 * window.innerWidth;
@@ -142,14 +126,6 @@ class Annotator extends Component {
     light.position.set(0,0,3);
     light.castShadow = true;
     scene.add(light);
-
-    // get annotation state
-    var index = userState.labeled_file.indexOf(selected_filename);
-    if (index !== -1){
-      $(".alert-success").show();
-      Marked = 1;
-      IntTime = userState.scene_time[index];
-    }
 
     // mesh
     this.addMesh();
@@ -196,10 +172,28 @@ class Annotator extends Component {
     mesh_mouse = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.Material());
     mesh_overseg = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.Material());
     loader = new PLYLoader();
+    meshService.loadSegIndices(datasetFolder + "/" + selected_filename + "/" + selected_filename + configs["seg_suffix"]);
     let load_message_annots = await labelService.loadAnnotationJson(selected_filename);
-    if (load_message_annots[0] !== "OK")
+    if (load_message_annots[0] !== "OK"){
       console.log(load_message_annots[0]);
-    annotations = load_message_annots[1];
+      let preannot_req_data = {
+        file_name: selected_filename,
+        seg_idx: meshService.getSegDict()
+      }
+      console.log(preannot_req_data);
+      let preAnnotations = await labelService.preAnnotateScene(JSON.stringify(preannot_req_data, null, 2));
+      if (preAnnotations[0] !== "OK"){
+        annotations = {}
+        console.log(preAnnotations[0]);
+      }
+      else{
+        console.log(preAnnotations[1]);
+        annotations = preAnnotations[1];
+      }
+    }
+    else{
+      annotations = load_message_annots[1];
+    }
     loader.load(
       datasetFolder + "/" + selected_filename + "/" + selected_filename + configs["mesh_suffix"],
       geometry => {
@@ -212,7 +206,6 @@ class Annotator extends Component {
         mesh_overseg.geometry.copy(geometry);
         
         // load segments and instances
-        meshService.loadSegIndices(datasetFolder + "/" + selected_filename + "/" + selected_filename + configs["seg_suffix"]);
         mesh_overseg = meshService.getSegmentMesh(mesh_overseg);
 
         // load annotation
@@ -251,7 +244,6 @@ class Annotator extends Component {
     segId_new = -1;
     class_selected = false;
     class_selected_lastLabeled = false;
-    IntTimePast = 0;
   };
 
   removeMesh = () => {
@@ -270,12 +262,6 @@ class Annotator extends Component {
 
   renderScene = () => {
     camera.updateMatrixWorld();
-
-    // get annotation time
-    if ((Marked === 0) && (timeButtonState === 0)){
-      EndTime = new Date().getTime();
-      IntTime = (EndTime - StarTime) / 1000 + IntTimePast;
-    }
 
     // monitor semantic change
     var all_options = document.getElementById("jumpMenu").options;
@@ -352,7 +338,7 @@ class Annotator extends Component {
   onMouseMove = e => {
     // calculate mouse position in normalized device coordinates
     // (-1 to +1) for both components
-    if ((e.altKey) && (class_selected === true) && (timeButtonState === 0)) { 
+    if ((e.altKey) && (class_selected === true)) { 
 
       // check existence
       let prev_class = labelService.getInfo(segId);
@@ -379,11 +365,6 @@ class Annotator extends Component {
         // annotate on a new instance
         if (class_selected_lastLabeled !== class_selected){
 
-          // annotate the first segment in the scene
-          if (class_selected_lastLabeled === false){
-            StarTime = new Date().getTime();
-          }
-
           // update annotation state
           class_selected_lastLabeled = class_selected;
         }
@@ -400,7 +381,7 @@ class Annotator extends Component {
   };
 
   onMouseClick = e => {
-    if ((e.shiftKey) && (class_selected === true) && (timeButtonState === 0)) { 
+    if ((e.shiftKey) && (class_selected === true)) { 
 
       // check existence
       let prev_class = labelService.getInfo(segId);
@@ -426,11 +407,6 @@ class Annotator extends Component {
 
         // annotate on a new instance
         if (class_selected_lastLabeled !== class_selected){
-
-          // annotate the first segment in the scene
-          if (class_selected_lastLabeled === false){
-            StarTime = new Date().getTime();
-          }
 
           // update annotation state
           class_selected_lastLabeled = class_selected;
@@ -540,24 +516,8 @@ class Annotator extends Component {
     this.removeMesh();
     labelService.clearAnnotation();
     this.addMesh();
-    
-    // get states
-    var index = userState.labeled_file.indexOf(selected_filename);
-    if (index !== -1){
-      $(".alert-success").show();
-      Marked = 1;
-      IntTime = userState.scene_time[index];
-      annotations = labelService.loadAnnotationJson(selected_filename);
-    }
-    else {
-      $(".alert-success").hide();
-      Marked = 0;
-      IntTime = 0;
-    }
 
     // initialize timer
-    IntTimePast = 0;
-    StarTime = undefined;
   };
 
   addInstance = () => {
@@ -583,66 +543,23 @@ class Annotator extends Component {
       alert(response);
   };
   
-  finishAnnotation = async () => {
-    if (typeof StarTime !== "undefined"){
-
-      this.saveAnnotation();
-
-      // reset annotation states
-      segId = -1;
-      segId_new = -1;
-      class_selected = false;
-      class_selected_lastLabeled = false;
-      segId2Color = undefined;
-      oversegId2Color = undefined;
-
-      // update user states
-      userState.scene_time.push(IntTime);
-      userState.total_time = 0;
-      for (var i = 0; i < userState.scene_time.length; i++){
-        userState.total_time += userState.scene_time[i];
-      }
-      userState.labeled_file.push(selected_filename);
-      console.log("marked!");
-      Marked = 1;
-      $(".alert-success").show();
-
-      // move to next scene
-      var index = filenames.indexOf(selected_filename);
-      if (index !== (filenames.length-1)){
-        selected_filename = filenames[index+1];
-      }
-      userState.current_filename = selected_filename;
-
-      // save user states
-      let response = await stateService.updateState(JSON.stringify(userState, null, 2));
-      if (response !== "OK")
-        alert(response);
-    }
-
-  };
-  
-  clearAnnotation = async () => {
+  clearAnnotation = () => {
     // clear current annotations
     annotations = labelService.clearAnnotation();
 
     // delete annotation file
     if (Marked) {
-      var index = userState.labeled_file.indexOf(selected_filename);
-      userState.labeled_file.splice(index, 1);
-      var interval = userState.scene_time[index];
-      userState.scene_time.splice(index, 1);
-      userState.total_time -= interval;
       console.log("clear annotations!");
       $(".alert-success").hide();
     }
-    userState.current_filename = selected_filename;
     let delete_data = {
-      file_name: userState.current_filename
+      file_name: selected_filename
     }
-    let delete_response = await stateService.deleteAnnotation(JSON.stringify(delete_data, null, 2));
-    if (delete_response !== "OK")
-      alert(delete_response);
+    let delete_response = stateService.deleteAnnotation(JSON.stringify(delete_data, null, 2));
+    delete_response.then(value => {
+      if (value !== "OK")
+        alert(value);
+    });
     // update mesh
     mesh.geometry.copy(mesh_hid.geometry);
     mesh_mouse.geometry.copy(mesh.geometry);
@@ -657,27 +574,6 @@ class Annotator extends Component {
     class_selected_lastLabeled = false;
     segId2Color = undefined;
     oversegId2Color = undefined;
-
-    // reset timer
-    IntTime = 0;
-    IntTimePast = 0;
-    StarTime = undefined;
-    let update_response = await stateService.updateState(JSON.stringify(userState, null, 2));
-    if (update_response !== "OK")
-      alert(update_response);
-  };
-
-  changeTimeButtonState = () => {
-    if (typeof StarTime !== "undefined"){
-      if (timeButtonState === 0){
-        timeButtonState = 1;
-        IntTimePast = IntTime;
-      }
-      else {
-        timeButtonState = 0;
-        StarTime = new Date().getTime();
-      }
-    }
   };
 
   RGBTohex = rgb => {
@@ -797,77 +693,11 @@ class Annotator extends Component {
                 </div>
               </div>
             </div>
-
-            <div className="row m-2">
-              <legend className="row col-form-label ">Progress:</legend>
-              <div
-                className="row state"
-                style={{
-                  width: 0.105 * window.innerWidth
-                }}
-              >
-              Scene: {userState.labeled_file.length} / {filenames.length}
-              </div>
-              <div
-                className="row state"
-                style={{
-                  width: 0.105 * window.innerWidth
-                }}
-              >
-              Time: {Math.round(IntTime)} s
-              </div>
-              <div
-                className="row state"
-                style={{
-                  width: 0.105 * window.innerWidth
-                }}
-              >
-              Avg Time: {Math.round(userState.total_time/userState.labeled_file.length)} s
-              </div>
-            </div>
-
             <div className="col" 
               style={{
                   width: 0.20 * window.innerWidth,
                   height: 0.03 * window.innerHeight
                 }}>
-            </div>
-
-            <div className="col" 
-              style={{
-                  width: 0.20 * window.innerWidth,
-                  height: 0.06 * window.innerHeight
-                }}>
-              <div className="row justify-content-start" 
-                style={{
-                  width: 0.20 * window.innerWidth,
-                  height: 0.01 * window.innerHeight
-                }}>
-                <button className="btn btn-dark" onClick={this.changeTimeButtonState}
-                style={{
-                  width: 0.12 * window.innerWidth
-                }}>
-                  {timeButton[timeButtonState]}
-                </button>
-              </div>
-            </div>
-            <div className="col" 
-              style={{
-                  width: 0.20 * window.innerWidth,
-                  height: 0.06 * window.innerHeight
-                }}>
-              <div className="row justify-content-start" 
-                style={{
-                  width: 0.20 * window.innerWidth,
-                  height: 0.01 * window.innerHeight
-                }}>
-                <button className="btn btn-dark" onClick={this.finishAnnotation}
-                style={{
-                  width: 0.12 * window.innerWidth
-                }}>
-                  Finish
-                </button>
-              </div>
             </div>
             <div className="col" 
               style={{

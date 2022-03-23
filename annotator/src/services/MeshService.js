@@ -35,7 +35,7 @@ class MeshService {
     return segIndices;
   };
 
-  updateSegDicts = () =>{
+  updateSegDicts = () => {
     for (var i = 0; i < segIndices.length; i++){
       if (typeof segDicts[segIndices[i]] === "undefined"){
         segDicts[segIndices[i]] = [i];
@@ -45,6 +45,10 @@ class MeshService {
       }
     }
   };
+
+  getSegDict = () => {
+    return segDicts;
+  }
 
   segId2Dict = segId => {
     return segDicts[segId];

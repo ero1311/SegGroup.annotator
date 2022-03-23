@@ -60,6 +60,26 @@ class LabelService {
     return result
   }
 
+  preAnnotateScene = async (data) => {
+    let response_data = await fetch(basePath + '/preannot', {
+      method: 'POST',
+      headers: {"Content-Type": "application/json"},
+      body: data
+    })
+    .then(async response => {
+        const data = await response.json();
+        if (!response.ok){
+          return ['Failed to preannotate', {}]
+        }
+        return [data.message, data.data]
+    })
+    .catch(error => {
+        return [error.toString(), {}];
+    });
+    annotations = response_data[1];
+    return response_data
+  }
+
   getInfo = (mouse_segId) => {
     for (let className in annotations) {
       if (annotations[className].indexOf(mouse_segId) !== -1){

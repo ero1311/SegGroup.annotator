@@ -1,4 +1,3 @@
-import $ from "jquery";
 import configs from "../configs.json";
 
 // import * as fs from "browserify-fs";
@@ -18,13 +17,21 @@ class StateService {
     return this.myInstance;
   }
 
-  loadState = path => {
-    $.ajaxSettings.async = false;
-    $.getJSON (path, function (data)
-      {
-        state = data;
+  loadState = async () => {
+    let req_path = basePath + '/loadstate';
+    let result = await fetch(req_path)
+      .then(async response => {
+          const data = await response.json();
+          if(data.status !== 200){
+            return [data.message, {}]
+          }
+          return [data.message, data.data]
+      })
+      .catch(error => {
+          return [error.toString(), {}]
       });
-    return state;
+    state = result[1];
+    return state
   };
 
   updateState = async (data) => {
