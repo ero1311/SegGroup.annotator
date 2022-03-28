@@ -23,15 +23,7 @@ let stateService = StateService.getInstance();
 const filenames = meshService.loadFileNames(configs["filename_path"]);
 var selected_filename;
 var semantics = configs["labels"];
-semantics.sort(function(a,b){
-  return a.label.localeCompare(b.label)
-});
 var selected_sem;
-var selected_sem_index = 0;
-var sem2id = {};
-for (let i = 0; i < semantics; i++){
-  sem2id[semantics[i].label] = semantics[i].id;
-}
 var Marked = 0;
 
 // define variables
@@ -65,12 +57,12 @@ var mouse_semantic = "none";
 // initialize key states
 var keySpace = 0;
 var keyQ = 0;
-var remove_anno = 0;
+var changes_count = 0, changes_percent = 0;
 
 const datasetFolder = configs["dataset_folder"];
 
 // initialize annotation
-var annotations = {};
+var annotations = {}, predictions = {};
 
 class Annotator extends Component {
   constructor(props) {
@@ -183,17 +175,26 @@ class Annotator extends Component {
       console.log(preannot_req_data);
       let preAnnotations = await labelService.preAnnotateScene(JSON.stringify(preannot_req_data, null, 2));
       if (preAnnotations[0] !== "OK"){
-        annotations = {}
+        annotations = {
+          changes: {
+            instance_count: new Set()
+          }
+        };
+        predictions = {};
         console.log(preAnnotations[0]);
       }
       else{
         console.log(preAnnotations[1]);
         annotations = preAnnotations[1];
+        predictions = preAnnotations[1];
       }
     }
     else{
       annotations = load_message_annots[1];
+      predictions = load_message_annots[2];
     }
+    changes_count = annotations["changes"].instance_count.size;
+    changes_percent = changes_count * 100 / Object.keys(meshService.getSegDict()).length;
     loader.load(
       datasetFolder + "/" + selected_filename + "/" + selected_filename + configs["mesh_suffix"],
       geometry => {
@@ -264,10 +265,10 @@ class Annotator extends Component {
     camera.updateMatrixWorld();
 
     // monitor semantic change
-    var all_options = document.getElementById("jumpMenu").options;
-    if ((all_options.selectedIndex !== selected_sem_index) && (remove_anno === 0)){
+    /*var all_options = document.getElementById("jumpMenu").options;
+    if ((all_options.selectedIndex !== selected_sem_index)){
       this.addInstance();
-    }
+    }*/
 
     // update the picking ray with the camera and mouse position
     raycaster.setFromCamera(mouse, camera);
@@ -344,7 +345,7 @@ class Annotator extends Component {
       let prev_class = labelService.getInfo(segId);
       if (prev_class !== selected_sem.label){
         if (prev_class !== "none"){
-          annotations = labelService.removeAnnotation(prev_class, segId)
+          annotations = labelService.removeAnnotation(prev_class, selected_sem.label, segId)
         }
         // add annotation
         annotations = labelService.addAnnotation(selected_sem.label, segId);
@@ -370,6 +371,8 @@ class Annotator extends Component {
         }
 
         // update annotation state
+        changes_count = annotations["changes"].instance_count.size;
+        changes_percent = changes_count * 100 / Object.keys(meshService.getSegDict()).length;
         segId = -1;
         this.saveAnnotation();
       }
@@ -387,7 +390,7 @@ class Annotator extends Component {
       let prev_class = labelService.getInfo(segId);
       if (prev_class !== selected_sem.label){
         if (prev_class !== "none"){
-          annotations = labelService.removeAnnotation(prev_class, segId)
+          annotations = labelService.removeAnnotation(prev_class, selected_sem.label, segId)
         }
         // add annotation
         annotations = labelService.addAnnotation(selected_sem.label, segId);
@@ -413,6 +416,8 @@ class Annotator extends Component {
         }
 
         // update annotation state
+        changes_count = annotations["changes"].instance_count.size;
+        changes_percent = changes_count * 100 / Object.keys(meshService.getSegDict()).length;
         segId = -1;
         this.saveAnnotation();
       }
@@ -462,17 +467,19 @@ class Annotator extends Component {
         // remove annotation
         let seg_class = labelService.getInfo(segId);
         if (seg_class !== "none"){
-          annotations = labelService.removeAnnotation(seg_class, segId)
+          annotations = labelService.removeAnnotation(seg_class, undefined, segId)
           // update mesh
           mesh.geometry.copy(mesh_hid.geometry);
-          for (let className in annotations){
-            for (let i=0; i < annotations[className].length; i++){
-              mesh = meshService.addSegmentColor(Number(annotations[className][i]), mesh, color_list[className]);
+          for (let className in annotations["classes"]){
+            for (let i=0; i < annotations["classes"][className].length; i++){
+              mesh = meshService.addSegmentColor(Number(annotations["classes"][className][i]), mesh, color_list[className]);
             }
           }
           mesh_mouse.geometry.copy(mesh.geometry);
           mesh.geometry.attributes.color.needsUpdate = true;
           mesh_mouse.geometry.attributes.color.needsUpdate = true;
+          changes_count = annotations["changes"].instance_count.size;
+          changes_percent = changes_count * 100 / Object.keys(meshService.getSegDict()).length;
           segId = -1;
           this.saveAnnotation();
         }
@@ -507,11 +514,12 @@ class Annotator extends Component {
 
   onFrameUpdate = e => {
     // get filename
+    var all_options = document.getElementById("scenesDrop").options;
     if (typeof e !== "undefined") {
-      selected_filename = e.target.id;
+      selected_filename = all_options[all_options.selectedIndex].value;
       console.log(selected_filename);
     }
-
+    this.classSelectionStyles(selected_sem, undefined);
     // update mesh
     this.removeMesh();
     labelService.clearAnnotation();
@@ -520,10 +528,11 @@ class Annotator extends Component {
     // initialize timer
   };
 
-  addInstance = () => {
-    var all_options = document.getElementById("jumpMenu").options;
-    selected_sem_index = all_options.selectedIndex;
-    selected_sem = semantics[selected_sem_index];
+  addInstance = e => {
+    let prev_sem = selected_sem;
+    let splitted_id = e.target.id.split('_');
+    selected_sem = semantics[splitted_id[splitted_id.length-1] - 1];
+    this.classSelectionStyles(prev_sem, selected_sem);
 
     if ((class_selected === false)){
       console.log("add instance")
@@ -533,12 +542,22 @@ class Annotator extends Component {
     }
   };
 
+  classSelectionStyles = (prev_class, curr_class) => {
+    if (prev_class !== undefined){
+      document.getElementById("sem_text_" + prev_class.id).style.backgroundColor = "transparent";
+    }
+    if (curr_class !== undefined){
+      document.getElementById("sem_text_" + curr_class.id).style.backgroundColor = this.RGBTohex(curr_class.color);
+    }
+  }
+
   saveAnnotation = async () => {
     let save_data = {
-      file_name: selected_filename,
-      annotations: labelService.getAnnotation()
+      "file_name": selected_filename,
+      "annotations": labelService.getAnnotation()
     }
     let response = await stateService.saveAnnotation(JSON.stringify(save_data, null, 2));
+    console.log(save_data, annotations);
     if (response !== "OK")
       alert(response);
   };
@@ -574,6 +593,9 @@ class Annotator extends Component {
     class_selected_lastLabeled = false;
     segId2Color = undefined;
     oversegId2Color = undefined;
+    changes_count = 0;
+    changes_percent = 0;
+    this.classSelectionStyles(selected_sem, undefined);
   };
 
   RGBTohex = rgb => {
@@ -590,6 +612,11 @@ class Annotator extends Component {
     return "#" + r.toString(16) + g.toString(16) + b.toString(16);
   };
 
+  handleClassSelect = e => {
+    let splitted_id = e.target.id.split('_');
+    selected_sem = semantics[splitted_id[splitted_id.length-1] - 1]
+  };
+
   render() {
     return (
       <div className="contain-fluid">
@@ -599,17 +626,14 @@ class Annotator extends Component {
           style={{ height: 0.12 * window.innerHeight }}
         >
           
+          <div className="col"></div>
           <div className="col">
-            <div className="col alert alert-success"
-            style={{
-                width: 0.1 * window.innerWidth,
-                height: 0.05 * window.innerHeight
-              }}>
-              <strong>
-                Marked!
-              </strong>
-            </div>
+            <p>
+              <font style={{ color: "orange" }}>Number of fixed instances</font>: {changes_count}
+              &nbsp;&nbsp; <font style={{ color: "orange" }}>Percent of fixed instances</font>: {changes_percent.toFixed(4).toString() + '%'}
+            </p>
           </div>
+          <div className="col"></div>
         </div>
         <div className="row">
           <div
@@ -631,65 +655,58 @@ class Annotator extends Component {
               height: 0.833 * window.innerHeight
             }}
           > 
-            <div className="col alert alert-info"
-            style={{
-              width: 0.125 * window.innerWidth,
-              height: 0.06 * window.innerHeight
-            }}>
-              <strong>
-                {selected_filename}
-              </strong>
-            </div>
-
             <div className="row m-2">
               <legend className="row col-form-label ">Scenes:</legend>
-              <div
-                className="row-sm-0 p-0 list-group"
-                id="list-tab"
-                role="tablist"
-                style={{
-                  width: 0.105 * window.innerWidth,
-                  height: 0.16 * window.innerHeight
-                }}
-              >
+              <select id="scenesDrop" className="form-control" onChange={this.onFrameUpdate}>
                 {filenames.map((fid, i) => (
-                  <a
+                  <option
                     key={i}
-                    className={`list-group-item px-2 py-2 list-group-item-action ${
-                      fid === selected_filename ? "active" : ""
-                    }`}
                     id={fid}
-                    data-toggle="list"
-                    href={`#list-${fid}`}
-                    onClick={this.onFrameUpdate}
+                    value={fid}
                   >
                     {fid}
-                  </a>
+                  </option>
 
                 ))}
-              </div>
+              </select>
             </div> 
 
-            <div className="row m-2">
+            <div className="row sm-12">
               <legend className="row col-form-label ">Semantic:</legend>
-              <div className="col-sm-8">
+              <div className="col-sm-12">
                 <div className="input-group">
-                  <select id="jumpMenu" className="form-control">
-                    {semantics.map((labelInfo, i) => (
-                      <option
-                        key={labelInfo.id}
-                        id={labelInfo.id}
-                        value={labelInfo.label}
+                  {semantics.map((labelInfo, i) => (
+                    <div
+                      className="col-sm-10 class-container"
+                      id={"container_" + labelInfo.id}
+                      key={"container_" + labelInfo.id}
+                      style={{
+                        height: 0.03 * window.innerHeight,
+                        outline: mouse_semantic === labelInfo.label ? "red solid 2px" : "none"
+                      }}
+                      onClick={this.addInstance}
+                    >
+                      <div
+                        className="col-sm-2 class-color-box"
+                        id={"color_" + labelInfo.id}
+                        style={{
+                          backgroundColor: this.RGBTohex(labelInfo.color)
+                        }}
+                      >
+                      </div>
+                      <p
+                        className="col-sm-10 class-text"
+                        style={{
+                          display: "inline",
+                          margin: "0px",
+                          wordBreak: "keep-all"
+                        }}
+                        id={"sem_text_" + labelInfo.id}
                       >
                         {labelInfo.label}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="input-group-btn">
-                    <button className="btn btn-default" type="button" onClick={this.addInstance}>
-                      Add
-                    </button>
-                  </span>
+                      </p>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>

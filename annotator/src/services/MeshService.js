@@ -105,9 +105,9 @@ class MeshService {
     /*for (var i = 0; i < segIndices.length; i++){
       mesh_seg_anno.geometry.attributes.color.setXYZ(i, 1, 1, 1);
     }*/
-    for (var className in annos) {
-      for (var i = 0; i < annos[className].length; i++){
-        mesh_seg_anno = this.addSegmentColor(annos[className][i], mesh_seg_anno, color_list[className]);
+    for (var className in annos["classes"]) {
+      for (var i = 0; i < annos["classes"][className].length; i++){
+        mesh_seg_anno = this.addSegmentColor(annos["classes"][className][i], mesh_seg_anno, color_list[className]);
       }
     }
     return mesh_seg_anno;

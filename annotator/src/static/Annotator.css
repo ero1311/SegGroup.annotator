@@ -28,6 +28,24 @@ bb {
   border-radius: 0px;
 }
 
+.class-container {
+  display: inline-flex;
+  margin-bottom: 1px;
+  padding: 0;
+  cursor: pointer;
+  width: 20%;
+}
+
+.class-color-box {
+  position: relative;
+  border: solid;
+  border-color: black;
+  display: inline-flex;
+  margin-bottom: 1px;
+  width: 5%;
+  height: 100%;
+}
+
 .alert-success {
   /*background-color: #FFFFFF;*/
   color: #2A2A2A;
