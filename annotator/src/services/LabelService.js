@@ -31,13 +31,19 @@ class LabelService {
       classes: annotations["classes"],
       changes: {
         instance_count: Array.from(annotations["changes"].instance_count)
-      }
+      },
+      time: annotations["time"]
     }
     return annot_exp;
   };
 
   getPrediction = () => {
     return predictions;
+  }
+
+  updateTime = time => {
+    annotations["time"] = time;
+    return annotations;
   }
 
   removeAnnotation = (prevClassName, currClassName, segId) => {

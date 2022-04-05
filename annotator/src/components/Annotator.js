@@ -6,6 +6,8 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { AmbientLight } from "three/src/lights/AmbientLight.js";
 import { PointLight } from "three/src/lights/PointLight.js";
 import Stats from "three/examples/jsm/libs/stats.module.js";
+import Timer from "react-timer-wrapper";
+import Timecode from "react-timecode";
 
 import $ from "jquery";
 
@@ -57,6 +59,7 @@ var mouse_semantic = "none";
 // initialize key states
 var keySpace = 0;
 var keyQ = 0;
+var keyC = 0;
 var changes_count = 0, changes_percent = 0;
 
 const datasetFolder = configs["dataset_folder"];
@@ -71,6 +74,8 @@ class Annotator extends Component {
     this.state = {
       loaded: 0,
       point: [],
+      timerActive: true,
+      startTime: 0,
     };
   }
 
@@ -121,7 +126,6 @@ class Annotator extends Component {
 
     // mesh
     this.addMesh();
-
     // stats
     stats = new Stats();
 
@@ -188,10 +192,18 @@ class Annotator extends Component {
         annotations = preAnnotations[1];
         predictions = preAnnotations[1];
       }
+      this.setState({
+        startTime: 0
+      });
     }
     else{
       annotations = load_message_annots[1];
       predictions = load_message_annots[2];
+      if (annotations["time"] !== undefined){
+        this.setState({
+          startTime: parseInt(annotations["time"])
+        });
+      }
     }
     changes_count = annotations["changes"].instance_count.size;
     changes_percent = changes_count * 100 / Object.keys(meshService.getSegDict()).length;
@@ -235,7 +247,8 @@ class Annotator extends Component {
       },
       xhr => {
         this.setState({
-          loaded: Math.round((xhr.loaded / xhr.total) * 100)
+          loaded: Math.round((xhr.loaded / xhr.total) * 100),
+          timerActive: false
         });
       }
     );
@@ -432,7 +445,7 @@ class Annotator extends Component {
 
   onKeyPress = e => {
     switch (e.keyCode) {
-      case 100: // d    next scene
+      /*case 100: // d    next scene
         if (filenames.indexOf(selected_filename) + 1 < filenames.length) {
           selected_filename = filenames[filenames.indexOf(selected_filename) + 1];
           this.onFrameUpdate();
@@ -442,6 +455,16 @@ class Annotator extends Component {
         if (filenames.indexOf(selected_filename) - 1 > -1) {
           selected_filename = filenames[filenames.indexOf(selected_filename) - 1];
           this.onFrameUpdate();
+        }
+        break;*/
+      case 99: // c show the changes over the preannotations
+        if (keyC === 0){
+          annotations["changes"].instance_count.forEach(element => {
+            mesh_mouse = meshService.addSegmentColor(element, mesh_mouse, [0, 0, 255]);
+            mesh_mouse.geometry.attributes.color.needsUpdate = true;
+            keyC = 1;
+            segId = -1;
+          })
         }
         break;
       case 104: // h    reset camera
@@ -507,6 +530,21 @@ class Annotator extends Component {
           segId = -1;
         }
         break;
+      case 67: // c hide the changes over the preannotations
+        if (keyC === 1){
+          mesh.geometry.copy(mesh_hid.geometry);
+          for (let className in annotations["classes"]){
+            for (let i=0; i < annotations["classes"][className].length; i++){
+              mesh = meshService.addSegmentColor(Number(annotations["classes"][className][i]), mesh, color_list[className]);
+            }
+          }
+          mesh_mouse.geometry.copy(mesh.geometry);
+          mesh.geometry.attributes.color.needsUpdate = true;
+          mesh_mouse.geometry.attributes.color.needsUpdate = true;
+          keyC = 0;
+          segId = -1;
+        }
+        break;
       default:
         break;
     }
@@ -514,6 +552,7 @@ class Annotator extends Component {
 
   onFrameUpdate = e => {
     // get filename
+    this.saveAnnotation();
     var all_options = document.getElementById("scenesDrop").options;
     if (typeof e !== "undefined") {
       selected_filename = all_options[all_options.selectedIndex].value;
@@ -552,6 +591,11 @@ class Annotator extends Component {
   }
 
   saveAnnotation = async () => {
+    if (!this.state.timerActive){
+      this.setState({
+        timerActive: true
+      });
+    }
     let save_data = {
       "file_name": selected_filename,
       "annotations": labelService.getAnnotation()
@@ -617,6 +661,10 @@ class Annotator extends Component {
     selected_sem = semantics[splitted_id[splitted_id.length-1] - 1]
   };
 
+  updateTime = ({duration, progress, time}) => {
+    annotations = labelService.updateTime(time);
+  }
+
   render() {
     return (
       <div className="contain-fluid">
@@ -628,6 +676,9 @@ class Annotator extends Component {
           
           <div className="col"></div>
           <div className="col">
+            <Timer active={this.state.timerActive} duration={null} onTimeUpdate={this.updateTime} time={this.state.startTime}>
+              <Timecode component={(props) => {return <span><font style={{ color: "orange" }}>Time</font>: {props.children[0]}</span>}}/>
+            </Timer>
             <p>
               <font style={{ color: "orange" }}>Number of fixed instances</font>: {changes_count}
               &nbsp;&nbsp; <font style={{ color: "orange" }}>Percent of fixed instances</font>: {changes_percent.toFixed(4).toString() + '%'}
