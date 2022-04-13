@@ -1,7 +1,7 @@
 {
     "host": "127.0.0.1",
     "inter_port": 5000,
-    "filename_path": "./data/scannet_v2_train.txt",
+    "filename_path": "./data/scannet_v2_tool_exp_100.txt",
     "filename_length": 12,
     "dataset_folder": "./data/scannet",
     "mesh_suffix": "_vh_clean_2.ply",

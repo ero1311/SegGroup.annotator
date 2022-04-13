@@ -94,6 +94,22 @@ class StateService {
     return response_data
   };
 
+  checkPreannot = async (filename) => {
+    let req_path = basePath + '/checkpreannot/' + filename;
+    let result = await fetch(req_path)
+      .then(async response => {
+          const data = await response.json();
+          if(data.status !== 200){
+            return [data.message, []]
+          }
+          return [data.message, data.data]
+      })
+      .catch(error => {
+          return [error.toString(), []]
+      });
+      
+    return result
+  }
 }
 
 export default StateService;

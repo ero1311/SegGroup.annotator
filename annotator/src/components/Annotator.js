@@ -58,14 +58,15 @@ var mouse_semantic = "none";
 
 // initialize key states
 var keySpace = 0;
-var keyQ = 0;
-var keyC = 0;
-var changes_count = 0, changes_percent = 0;
+var keyQ = 0; //show original mesh
+var keyC = 0; //show fixed instances
+var keyG = 0; //show instances that are wrong in preannotation
+var to_fix_idx = [], to_fix_count = 0, to_fix_percent = 0, tp_count = 0, fp_count = 0, fn_count = 0;
 
 const datasetFolder = configs["dataset_folder"];
 
 // initialize annotation
-var annotations = {}, predictions = {};
+var annotations = {};
 
 class Annotator extends Component {
   constructor(props) {
@@ -172,6 +173,9 @@ class Annotator extends Component {
     let load_message_annots = await labelService.loadAnnotationJson(selected_filename);
     if (load_message_annots[0] !== "OK"){
       console.log(load_message_annots[0]);
+      this.setState({
+        startTime: 0
+      });
       let preannot_req_data = {
         file_name: selected_filename,
         seg_idx: meshService.getSegDict()
@@ -184,29 +188,27 @@ class Annotator extends Component {
             instance_count: new Set()
           }
         };
-        predictions = {};
         console.log(preAnnotations[0]);
       }
       else{
         console.log(preAnnotations[1]);
         annotations = preAnnotations[1];
-        predictions = preAnnotations[1];
       }
-      this.setState({
-        startTime: 0
-      });
     }
     else{
       annotations = load_message_annots[1];
-      predictions = load_message_annots[2];
       if (annotations["time"] !== undefined){
         this.setState({
           startTime: parseInt(annotations["time"])
         });
       }
     }
-    changes_count = annotations["changes"].instance_count.size;
-    changes_percent = changes_count * 100 / Object.keys(meshService.getSegDict()).length;
+    let preannot_check_res = await stateService.checkPreannot(selected_filename);
+    console.log(preannot_check_res[0]);
+    to_fix_idx = preannot_check_res[1];
+    to_fix_count = to_fix_idx.length;
+    to_fix_percent = to_fix_count * 100 / Object.keys(meshService.getSegDict()).length;
+    this.updateFixNeeded();
     loader.load(
       datasetFolder + "/" + selected_filename + "/" + selected_filename + configs["mesh_suffix"],
       geometry => {
@@ -383,9 +385,7 @@ class Annotator extends Component {
           class_selected_lastLabeled = class_selected;
         }
 
-        // update annotation state
-        changes_count = annotations["changes"].instance_count.size;
-        changes_percent = changes_count * 100 / Object.keys(meshService.getSegDict()).length;
+        this.updateFixNeeded();
         segId = -1;
         this.saveAnnotation();
       }
@@ -428,9 +428,7 @@ class Annotator extends Component {
           class_selected_lastLabeled = class_selected;
         }
 
-        // update annotation state
-        changes_count = annotations["changes"].instance_count.size;
-        changes_percent = changes_count * 100 / Object.keys(meshService.getSegDict()).length;
+        this.updateFixNeeded();
         segId = -1;
         this.saveAnnotation();
       }
@@ -444,6 +442,7 @@ class Annotator extends Component {
   };
 
   onKeyPress = e => {
+    console.log("keypress: ", e.keyCode);
     switch (e.keyCode) {
       /*case 100: // d    next scene
         if (filenames.indexOf(selected_filename) + 1 < filenames.length) {
@@ -463,6 +462,16 @@ class Annotator extends Component {
             mesh_mouse = meshService.addSegmentColor(element, mesh_mouse, [0, 0, 255]);
             mesh_mouse.geometry.attributes.color.needsUpdate = true;
             keyC = 1;
+            segId = -1;
+          })
+        }
+        break;
+      case 103: // g show instances that are wrong in preannotation
+        if (keyG === 0){
+          to_fix_idx.forEach(element => {
+            mesh_mouse = meshService.addSegmentColor(element, mesh_mouse, [255, 255, 0]);
+            mesh_mouse.geometry.attributes.color.needsUpdate = true;
+            keyG = 1;
             segId = -1;
           })
         }
@@ -501,8 +510,7 @@ class Annotator extends Component {
           mesh_mouse.geometry.copy(mesh.geometry);
           mesh.geometry.attributes.color.needsUpdate = true;
           mesh_mouse.geometry.attributes.color.needsUpdate = true;
-          changes_count = annotations["changes"].instance_count.size;
-          changes_percent = changes_count * 100 / Object.keys(meshService.getSegDict()).length;
+          this.updateFixNeeded();
           segId = -1;
           this.saveAnnotation();
         }
@@ -513,6 +521,7 @@ class Annotator extends Component {
   };
 
   onKeyUp = e => {
+    console.log("keyup: ", e.keyCode);
     switch (e.keyCode) {
       case 32: // space   hide segments
         if (keySpace === 1){
@@ -542,6 +551,21 @@ class Annotator extends Component {
           mesh.geometry.attributes.color.needsUpdate = true;
           mesh_mouse.geometry.attributes.color.needsUpdate = true;
           keyC = 0;
+          segId = -1;
+        }
+        break;
+      case 71: // g hide instances that are wrong in preannotation
+        if (keyG === 1){
+          mesh.geometry.copy(mesh_hid.geometry);
+          for (let className in annotations["classes"]){
+            for (let i=0; i < annotations["classes"][className].length; i++){
+              mesh = meshService.addSegmentColor(Number(annotations["classes"][className][i]), mesh, color_list[className]);
+            }
+          }
+          mesh_mouse.geometry.copy(mesh.geometry);
+          mesh.geometry.attributes.color.needsUpdate = true;
+          mesh_mouse.geometry.attributes.color.needsUpdate = true;
+          keyG = 0;
           segId = -1;
         }
         break;
@@ -637,8 +661,12 @@ class Annotator extends Component {
     class_selected_lastLabeled = false;
     segId2Color = undefined;
     oversegId2Color = undefined;
-    changes_count = 0;
-    changes_percent = 0;
+    to_fix_idx = [];
+    to_fix_percent = 0;
+    to_fix_count = 0;
+    tp_count = 0;
+    fp_count = 0;
+    fn_count = 0;
     this.classSelectionStyles(selected_sem, undefined);
   };
 
@@ -655,6 +683,18 @@ class Annotator extends Component {
       b = "0" + b;
     return "#" + r.toString(16) + g.toString(16) + b.toString(16);
   };
+
+  updateFixNeeded = () => {
+    let tps = 0;
+    annotations["changes"].instance_count.forEach(element => {
+      if (to_fix_idx.indexOf(element) !== -1){
+        tps += 1;
+      }
+    });
+    tp_count = tps;
+    fp_count = annotations["changes"].instance_count.size - tp_count;
+    fn_count = to_fix_idx.length - tp_count;
+  }
 
   handleClassSelect = e => {
     let splitted_id = e.target.id.split('_');
@@ -676,15 +716,31 @@ class Annotator extends Component {
           
           <div className="col"></div>
           <div className="col">
-            <Timer active={this.state.timerActive} duration={null} onTimeUpdate={this.updateTime} time={this.state.startTime}>
-              <Timecode component={(props) => {return <span><font style={{ color: "orange" }}>Time</font>: {props.children[0]}</span>}}/>
-            </Timer>
+            <div className="row">
+              <span style={{fontSize: "15px"}}><font style={{ color: "orange" }}>Number of instances to fix</font>: {to_fix_count}</span>
+              &nbsp;&nbsp; <span style={{fontSize: "15px"}}><font style={{ color: "orange" }}>Percent of instances to fix</font>: {to_fix_percent.toFixed(4).toString() + '%'}</span>
+            </div>
+            <div className="row">
             <p>
-              <font style={{ color: "orange" }}>Number of fixed instances</font>: {changes_count}
-              &nbsp;&nbsp; <font style={{ color: "orange" }}>Percent of fixed instances</font>: {changes_percent.toFixed(4).toString() + '%'}
+              <span style={{fontSize: "15px"}}><font style={{ color: "orange" }}>Fixed / Needed to fix</font>: {tp_count}</span>
+              &nbsp;&nbsp; <span style={{fontSize: "15px"}}><font style={{ color: "orange" }}>Fixed / Not needed to fix</font>: {fp_count}</span>
             </p>
+            </div>
+            <div className="row">
+              <span style={{fontSize: "15px"}}><font style={{ color: "orange" }}>Not fixed / Needed to fix</font>: {fn_count}</span>
+            </div>
           </div>
-          <div className="col"></div>
+          <div className="col">
+            <div className="row">
+              <div className="col"></div>
+                  <div className="col">
+                    <Timer active={this.state.timerActive} duration={null} onTimeUpdate={this.updateTime} time={this.state.startTime}>
+                      <Timecode component={(props) => {return <span style={{fontSize: "20px"}}><font style={{ color: "orange"}}>Time</font>: {props.children[0]}</span>}}/>
+                    </Timer>
+                  </div>
+              <div className="col"></div>
+            </div>
+          </div>
         </div>
         <div className="row">
           <div
