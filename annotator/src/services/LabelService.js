@@ -59,6 +59,7 @@ class LabelService {
           pred_class_same = true;
         }
       }
+      console.log(pred_class_same);
       if (pred_class_same){
         annotations["changes"].instance_count.delete(segId);
       }else{
@@ -115,12 +116,12 @@ class LabelService {
     .then(async response => {
         const data = await response.json();
         if (!response.ok){
-          return ['Failed to preannotate', {}]
+          return ['Failed to preannotate', {}, {}]
         }
-        return [data.message, data.data]
+        return [data.message, data.data, data.preds]
     })
     .catch(error => {
-        return [error.toString(), {}];
+        return [error.toString(), {}, {}];
     });
     if (response_data[1]["changes"] !== undefined){
       response_data[1]["changes"].instance_count = new Set(response_data[1]["changes"].instance_count);
@@ -130,11 +131,13 @@ class LabelService {
       };
     }
     annotations = response_data[1];
-    predictions = response_data[1];
+    predictions = response_data[2];
     return response_data
   }
 
   getInfo = (mouse_segId) => {
+    if (mouse_segId === -1)
+      return "none"
     for (let className in annotations["classes"]) {
       if (annotations["classes"][className].indexOf(mouse_segId) !== -1){
         return className;

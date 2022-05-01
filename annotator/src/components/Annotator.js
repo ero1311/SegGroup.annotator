@@ -180,7 +180,6 @@ class Annotator extends Component {
         file_name: selected_filename,
         seg_idx: meshService.getSegDict()
       }
-      console.log(preannot_req_data);
       let preAnnotations = await labelService.preAnnotateScene(JSON.stringify(preannot_req_data, null, 2));
       if (preAnnotations[0] !== "OK"){
         annotations = {
@@ -191,7 +190,6 @@ class Annotator extends Component {
         console.log(preAnnotations[0]);
       }
       else{
-        console.log(preAnnotations[1]);
         annotations = preAnnotations[1];
       }
     }
@@ -358,6 +356,7 @@ class Annotator extends Component {
 
       // check existence
       let prev_class = labelService.getInfo(segId);
+      //console.log(prev_class);
       if (prev_class !== selected_sem.label){
         if (prev_class !== "none"){
           annotations = labelService.removeAnnotation(prev_class, selected_sem.label, segId)
@@ -386,6 +385,7 @@ class Annotator extends Component {
         }
 
         this.updateFixNeeded();
+        //console.log(fp_count);
         segId = -1;
         this.saveAnnotation();
       }
@@ -442,7 +442,6 @@ class Annotator extends Component {
   };
 
   onKeyPress = e => {
-    console.log("keypress: ", e.keyCode);
     switch (e.keyCode) {
       /*case 100: // d    next scene
         if (filenames.indexOf(selected_filename) + 1 < filenames.length) {
@@ -521,7 +520,6 @@ class Annotator extends Component {
   };
 
   onKeyUp = e => {
-    console.log("keyup: ", e.keyCode);
     switch (e.keyCode) {
       case 32: // space   hide segments
         if (keySpace === 1){
@@ -580,7 +578,6 @@ class Annotator extends Component {
     var all_options = document.getElementById("scenesDrop").options;
     if (typeof e !== "undefined") {
       selected_filename = all_options[all_options.selectedIndex].value;
-      console.log(selected_filename);
     }
     this.classSelectionStyles(selected_sem, undefined);
     // update mesh
@@ -598,8 +595,6 @@ class Annotator extends Component {
     this.classSelectionStyles(prev_sem, selected_sem);
 
     if ((class_selected === false)){
-      console.log("add instance")
-
       segId = -1;
       class_selected = true;
     }
@@ -625,7 +620,6 @@ class Annotator extends Component {
       "annotations": labelService.getAnnotation()
     }
     let response = await stateService.saveAnnotation(JSON.stringify(save_data, null, 2));
-    console.log(save_data, annotations);
     if (response !== "OK")
       alert(response);
   };
