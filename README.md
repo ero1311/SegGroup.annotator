@@ -43,4 +43,4 @@ Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
 
 &nbsp;
 ## Reference repos:  
-- [point-cloud-annotator](https://github.com/AnTao97/SegGroup.annotator)  
+- [SegGroup.annotator](https://github.com/AnTao97/SegGroup.annotator)  
