@@ -30,27 +30,26 @@ var Marked = 0;
 
 // define variables
 var camera, controls, light, scene, stats, renderer, loader;
-var mesh, mesh_hid, mesh_mouse, mesh_overseg;
+var mesh, mesh_hid, mesh_mouse;
 var segId2Color, oversegId2Color;
 
 // initialize raycaster
 var raycaster = new THREE.Raycaster();
 raycaster.params.Points.threshold = 0.01;
 var mouse = new THREE.Vector2();
-var meshes, pointSelectIndex;
+var meshes, pointSelectIndex, brushSize = 0.001, brushStep = 0.0001;
 
 // initialize annotation states
-var segId = -1;
-var segId_new = -1;
+var pointId = -1;
 var class_selected = false;
 var class_selected_lastLabeled = false;
 var color_list = {};
-for(let i=0; i < configs["labels"].length; i++){
+for (let i = 0; i < configs["labels"].length; i++) {
   let r, g, b;
   [r, g, b] = configs["labels"][i]["color"];
-  r = r/255;
-  g = g/255;
-  b = b/255;
+  r = r / 255;
+  g = g / 255;
+  b = b / 255;
   color_list[configs["labels"][i]["label"]] = [r, g, b];
 }
 
@@ -61,12 +60,12 @@ var keySpace = 0;
 var keyQ = 0; //show original mesh
 var keyC = 0; //show fixed instances
 var keyG = 0; //show instances that are wrong in preannotation
-var to_fix_idx = [], to_fix_count = 0, to_fix_percent = 0, tp_count = 0, fp_count = 0, fn_count = 0;
+var to_fix_idx = [], curr_selected_pts = {};
 
 const datasetFolder = configs["dataset_folder"];
 
 // initialize annotation
-var annotations = {};
+var annotations = [];
 
 class Annotator extends Component {
   constructor(props) {
@@ -121,7 +120,7 @@ class Annotator extends Component {
     // light
     scene.add(new AmbientLight(0x888888));
     light = new PointLight(0x888888);
-    light.position.set(0,0,3);
+    light.position.set(0, 0, 3);
     light.castShadow = true;
     scene.add(light);
 
@@ -167,83 +166,72 @@ class Annotator extends Component {
     mesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.Material());
     mesh_hid = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.Material());
     mesh_mouse = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.Material());
-    mesh_overseg = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.Material());
     loader = new PLYLoader();
-    meshService.loadSegIndices(datasetFolder + "/" + selected_filename + "/" + selected_filename + configs["seg_suffix"]);
     let load_message_annots = await labelService.loadAnnotationJson(selected_filename);
-    if (load_message_annots[0] !== "OK"){
+    if (load_message_annots[0] !== "OK") {
       console.log(load_message_annots[0]);
       this.setState({
         startTime: 0
       });
       let preannot_req_data = {
-        file_name: selected_filename,
-        seg_idx: meshService.getSegDict()
+        file_name: selected_filename
       }
       let preAnnotations = await labelService.preAnnotateScene(JSON.stringify(preannot_req_data, null, 2));
-      if (preAnnotations[0] !== "OK"){
-        annotations = {
-          changes: {
-            instance_count: new Set()
-          }
-        };
+      if (preAnnotations[0] !== "OK") {
         console.log(preAnnotations[0]);
       }
-      else{
+      else {
         annotations = preAnnotations[1];
       }
     }
-    else{
+    else {
       annotations = load_message_annots[1];
-      if (annotations["time"] !== undefined){
+      if (annotations["time"] !== undefined) {
         this.setState({
           startTime: parseInt(annotations["time"])
         });
       }
     }
-    let preannot_check_res = await stateService.checkPreannot(selected_filename);
+    /*let preannot_check_res = await stateService.checkPreannot(selected_filename);
     console.log(preannot_check_res[0]);
     to_fix_idx = preannot_check_res[1];
     to_fix_count = to_fix_idx.length;
     to_fix_percent = to_fix_count * 100 / Object.keys(meshService.getSegDict()).length;
-    this.updateFixNeeded();
+    this.updateFixNeeded();*/
     loader.load(
       datasetFolder + "/" + selected_filename + "/" + selected_filename + configs["mesh_suffix"],
       geometry => {
         geometry.computeBoundingBox();
-        geometry.translate(-((geometry.boundingBox.max.x - geometry.boundingBox.min.x)/2 + geometry.boundingBox.min.x) , -((geometry.boundingBox.max.y - geometry.boundingBox.min.y)/2 + geometry.boundingBox.min.y) , -1);                
-        
+        geometry.translate(-((geometry.boundingBox.max.x - geometry.boundingBox.min.x) / 2 + geometry.boundingBox.min.x), -((geometry.boundingBox.max.y - geometry.boundingBox.min.y) / 2 + geometry.boundingBox.min.y), -1);
+
         // geometry
         mesh.geometry.copy(geometry);
         mesh_hid.geometry.copy(geometry);
-        mesh_overseg.geometry.copy(geometry);
-        
-        // load segments and instances
-        mesh_overseg = meshService.getSegmentMesh(mesh_overseg);
 
         // load annotation
-        mesh = meshService.getSegAnnoMesh(mesh, annotations, color_list);
-        
+        if (Object.keys(annotations).length !== 0) {
+          mesh = meshService.getSegAnnoMesh(mesh, annotations, color_list, semantics);
+        }
+
         // determine which mesh to show
         mesh_mouse.geometry.copy(mesh.geometry);
 
         // material
-        var material = new THREE.MeshPhongMaterial( { color: 0xffffff, specular: 0x010101, shininess: 100, flatShading: true, vertexColors: THREE.VertexColors} );
+        var material = new THREE.MeshPhongMaterial({ color: 0xffffff, specular: 0x010101, shininess: 100, flatShading: true, vertexColors: THREE.VertexColors });
         mesh.material = material;
         mesh_mouse.material = material;
-        mesh_overseg.material = material;
 
         mesh.castShadow = true;
         mesh_mouse.castShadow = true;
-        mesh_overseg.castShadow = true;
 
         mesh.receiveShadow = true;
         mesh_mouse.receiveShadow = true;
-        mesh_overseg.receiveShadow = true;
 
         scene.add(mesh_mouse);
         meshes = [mesh];
-
+        if (annotations.length === 0) {
+          annotations = labelService.initAnnotations(mesh.geometry.attributes.position.count);
+        }
       },
       xhr => {
         this.setState({
@@ -254,8 +242,6 @@ class Annotator extends Component {
     );
 
     // initialize annotation states
-    segId = -1;
-    segId_new = -1;
     class_selected = false;
     class_selected_lastLabeled = false;
   };
@@ -294,39 +280,39 @@ class Annotator extends Component {
         // get intersected face
         var intersection = intersections[0];
         var face = intersection.face;
-        
+
         // get face vertices
         var v1 = [mesh_mouse.geometry.attributes.position.getX(face.a), mesh_mouse.geometry.attributes.position.getY(face.a), mesh_mouse.geometry.attributes.position.getZ(face.a)];
         var v2 = [mesh_mouse.geometry.attributes.position.getX(face.b), mesh_mouse.geometry.attributes.position.getY(face.b), mesh_mouse.geometry.attributes.position.getZ(face.b)];
         var v3 = [mesh_mouse.geometry.attributes.position.getX(face.c), mesh_mouse.geometry.attributes.position.getY(face.c), mesh_mouse.geometry.attributes.position.getZ(face.c)];
-        
+
         // choose the nearest vertice
-        var dist1 = (v1[0]-intersection.point.x)^2 + (v1[1]-intersection.point.y)^2 + (v1[2]-intersection.point.z)^2;
-        var dist2 = (v2[0]-intersection.point.x)^2 + (v2[1]-intersection.point.y)^2 + (v2[2]-intersection.point.z)^2;
-        var dist3 = (v3[0]-intersection.point.x)^2 + (v3[1]-intersection.point.y)^2 + (v3[2]-intersection.point.z)^2;
+        var dist1 = (v1[0] - intersection.point.x) ^ 2 + (v1[1] - intersection.point.y) ^ 2 + (v1[2] - intersection.point.z) ^ 2;
+        var dist2 = (v2[0] - intersection.point.x) ^ 2 + (v2[1] - intersection.point.y) ^ 2 + (v2[2] - intersection.point.z) ^ 2;
+        var dist3 = (v3[0] - intersection.point.x) ^ 2 + (v3[1] - intersection.point.y) ^ 2 + (v3[2] - intersection.point.z) ^ 2;
         var dist_min = dist1;
         pointSelectIndex = face.a;
-        if (dist_min > dist2) {  
+        if (dist_min > dist2) {
           dist_min = dist2;
           pointSelectIndex = face.b;
         }
-        if (dist_min > dist3) {  
+        if (dist_min > dist3) {
           dist_min = dist3;
           pointSelectIndex = face.c;
-        } 
+        }
         this.setState({
           point: intersection.point
         });
 
         // show intersected segment in mesh
-        segId_new = meshService.index2segId(pointSelectIndex);
-        if (segId_new !== segId){
+        /*segId_new = meshService.index2segId(pointSelectIndex);
+        if (segId_new !== segId) {
           let seg_class = labelService.getInfo(segId_new);
           let color;
-          if (seg_class === "none"){
+          if (seg_class === "none") {
             color = [255, 0, 0];
           }
-          else{
+          else {
             color = [0, 255, 0];
           }
           if (keySpace && oversegId2Color !== undefined) {
@@ -342,7 +328,17 @@ class Annotator extends Component {
           segId = segId_new;
         }
 
-        mouse_semantic = labelService.getInfo(segId_new);
+        mouse_semantic = labelService.getInfo(segId_new);*/
+        if (pointSelectIndex !== pointId) {
+          let color = [255, 0, 0];
+          if (Object.keys(curr_selected_pts).length !== 0) {
+            mesh_mouse = meshService.removeBrushColor(curr_selected_pts, mesh_mouse)
+          }
+          [mesh_mouse, curr_selected_pts] = meshService.addBrushColor(pointSelectIndex, mesh_mouse, color, brushSize);
+          pointId = pointSelectIndex;
+          mesh_mouse.geometry.attributes.color.needsUpdate = true;
+        }
+        mouse_semantic = labelService.getInfo(annotations["annots"][pointSelectIndex], semantics);
       }
     }
 
@@ -352,43 +348,24 @@ class Annotator extends Component {
   onMouseMove = e => {
     // calculate mouse position in normalized device coordinates
     // (-1 to +1) for both components
-    if ((e.altKey) && (class_selected === true)) { 
+    if ((e.altKey) && (class_selected === true)) {
+      let color = color_list[selected_sem.label];
+      [annotations, curr_selected_pts] = labelService.addAnnotation(selected_sem.id, curr_selected_pts, color);
+      //mesh = meshService.addSegmentColor(segId, mesh, color);
+      //mesh_overseg = meshService.addSegmentColor(segId, mesh_overseg, color);
+      //mesh.geometry.attributes.color.needsUpdate = true;
+      //mesh_overseg.geometry.attributes.color.needsUpdate = true;
+      //mesh_mouse.geometry.attributes.color.needsUpdate = true;
 
-      // check existence
-      let prev_class = labelService.getInfo(segId);
-      //console.log(prev_class);
-      if (prev_class !== selected_sem.label){
-        if (prev_class !== "none"){
-          annotations = labelService.removeAnnotation(prev_class, selected_sem.label, segId)
-        }
-        // add annotation
-        annotations = labelService.addAnnotation(selected_sem.label, segId);
-        // update mesh
-        let color = color_list[selected_sem.label];
-        mesh = meshService.addSegmentColor(segId, mesh, color);
-        mesh_overseg = meshService.addSegmentColor(segId, mesh_overseg, color);
-        if (keySpace) {
-          mesh_mouse.geometry.copy(mesh_overseg.geometry);
-        }
-        else {
-          mesh_mouse.geometry.copy(mesh.geometry);
-        }
-        mesh.geometry.attributes.color.needsUpdate = true;
-        mesh_overseg.geometry.attributes.color.needsUpdate = true;
-        mesh_mouse.geometry.attributes.color.needsUpdate = true;
+      // annotate on a new instance
+      if (class_selected_lastLabeled !== class_selected) {
 
-        // annotate on a new instance
-        if (class_selected_lastLabeled !== class_selected){
-
-          // update annotation state
-          class_selected_lastLabeled = class_selected;
-        }
-
-        this.updateFixNeeded();
-        //console.log(fp_count);
-        segId = -1;
-        this.saveAnnotation();
+        // update annotation state
+        class_selected_lastLabeled = class_selected;
       }
+
+      //console.log(fp_count);
+      this.saveAnnotation();
     }
     e.preventDefault();
     mouse.x = ((e.clientX + 5) / this.mount.clientWidth) * 2 - 1;
@@ -397,41 +374,23 @@ class Annotator extends Component {
   };
 
   onMouseClick = e => {
-    if ((e.shiftKey) && (class_selected === true)) { 
+    if ((e.shiftKey) && (class_selected === true)) {
+      var color = color_list[selected_sem.label];
+      [annotations, curr_selected_pts] = labelService.addAnnotation(selected_sem.id, curr_selected_pts, color);
+      //mesh = meshService.addSegmentColor(segId, mesh, color);
+      //mesh_overseg = meshService.addSegmentColor(segId, mesh_overseg, color);
+      //mesh.geometry.attributes.color.needsUpdate = true;
+      //mesh_overseg.geometry.attributes.color.needsUpdate = true;
+      //mesh_mouse.geometry.attributes.color.needsUpdate = true;
 
-      // check existence
-      let prev_class = labelService.getInfo(segId);
-      if (prev_class !== selected_sem.label){
-        if (prev_class !== "none"){
-          annotations = labelService.removeAnnotation(prev_class, selected_sem.label, segId)
-        }
-        // add annotation
-        annotations = labelService.addAnnotation(selected_sem.label, segId);
-        // update mesh
-        var color = color_list[selected_sem.label];
-        mesh = meshService.addSegmentColor(segId, mesh, color);
-        mesh_overseg = meshService.addSegmentColor(segId, mesh_overseg, color);
-        if (keySpace) {
-          mesh_mouse.geometry.copy(mesh_overseg.geometry);
-        }
-        else {
-          mesh_mouse.geometry.copy(mesh.geometry);
-        }
-        mesh.geometry.attributes.color.needsUpdate = true;
-        mesh_overseg.geometry.attributes.color.needsUpdate = true;
-        mesh_mouse.geometry.attributes.color.needsUpdate = true;
+      // annotate on a new instance
+      if (class_selected_lastLabeled !== class_selected) {
 
-        // annotate on a new instance
-        if (class_selected_lastLabeled !== class_selected){
-
-          // update annotation state
-          class_selected_lastLabeled = class_selected;
-        }
-
-        this.updateFixNeeded();
-        segId = -1;
-        this.saveAnnotation();
+        // update annotation state
+        class_selected_lastLabeled = class_selected;
       }
+
+      this.saveAnnotation();
     }
   };
 
@@ -442,21 +401,10 @@ class Annotator extends Component {
   };
 
   onKeyPress = e => {
+    console.log(e);
     switch (e.keyCode) {
-      /*case 100: // d    next scene
-        if (filenames.indexOf(selected_filename) + 1 < filenames.length) {
-          selected_filename = filenames[filenames.indexOf(selected_filename) + 1];
-          this.onFrameUpdate();
-        }
-        break;
-      case 97: // a     last scene
-        if (filenames.indexOf(selected_filename) - 1 > -1) {
-          selected_filename = filenames[filenames.indexOf(selected_filename) - 1];
-          this.onFrameUpdate();
-        }
-        break;*/
-      case 99: // c show the changes over the preannotations
-        if (keyC === 0){
+      /*case 99: // c show the changes over the preannotations
+        if (keyC === 0) {
           annotations["changes"].instance_count.forEach(element => {
             mesh_mouse = meshService.addSegmentColor(element, mesh_mouse, [0, 0, 255]);
             mesh_mouse.geometry.attributes.color.needsUpdate = true;
@@ -466,7 +414,7 @@ class Annotator extends Component {
         }
         break;
       case 103: // g show instances that are wrong in preannotation
-        if (keyG === 0){
+        if (keyG === 0) {
           to_fix_idx.forEach(element => {
             mesh_mouse = meshService.addSegmentColor(element, mesh_mouse, [255, 255, 0]);
             mesh_mouse.geometry.attributes.color.needsUpdate = true;
@@ -474,45 +422,47 @@ class Annotator extends Component {
             segId = -1;
           })
         }
-        break;
+        break;*/
       case 104: // h    reset camera
         controls.reset();
         break;
-      case 32: // space   show segments
-        if (keySpace === 0){
-          mesh_mouse.geometry.copy(mesh_overseg.geometry);
-          mesh_mouse.geometry.attributes.color.needsUpdate = true;
-          keySpace = 1;
-          segId = -1;
-        }
-        break;
       case 113: // q      show original mesh
-        if (keyQ === 0){
+        if (keyQ === 0) {
           mesh_mouse.geometry.copy(mesh_hid.geometry);
           mesh_mouse.geometry.attributes.color.needsUpdate = true;
           keyQ = 1;
-          segId = -1;
         }
         break;
       case 122: // z      remove annotated segment
         // remove annotation
-        let seg_class = labelService.getInfo(segId);
-        if (seg_class !== "none"){
-          annotations = labelService.removeAnnotation(seg_class, undefined, segId)
-          // update mesh
-          mesh.geometry.copy(mesh_hid.geometry);
-          for (let className in annotations["classes"]){
-            for (let i=0; i < annotations["classes"][className].length; i++){
-              mesh = meshService.addSegmentColor(Number(annotations["classes"][className][i]), mesh, color_list[className]);
-            }
+        [annotations, curr_selected_pts] = labelService.removeAnnotation(curr_selected_pts, mesh_hid)
+        // update mesh
+        /*mesh.geometry.copy(mesh_hid.geometry);
+        for (let className in annotations["classes"]) {
+          for (let i = 0; i < annotations["classes"][className].length; i++) {
+            mesh = meshService.addSegmentColor(Number(annotations["classes"][className][i]), mesh, color_list[className]);
           }
-          mesh_mouse.geometry.copy(mesh.geometry);
-          mesh.geometry.attributes.color.needsUpdate = true;
-          mesh_mouse.geometry.attributes.color.needsUpdate = true;
-          this.updateFixNeeded();
-          segId = -1;
-          this.saveAnnotation();
         }
+        mesh_mouse.geometry.copy(mesh.geometry);
+        mesh.geometry.attributes.color.needsUpdate = true;
+        mesh_mouse.geometry.attributes.color.needsUpdate = true;*/
+        this.saveAnnotation();
+        break;
+      case 43: // + increase the brush size
+        brushSize += brushStep;
+        if (brushSize > 1){
+          brushSize = 1;
+        }
+        mesh.geometry.attributes.color.needsUpdate = true;
+        mesh_mouse.geometry.attributes.color.needsUpdate = true;
+        break;
+      case 45: // - decrease the brush size
+        brushSize -= brushStep;
+        if (brushSize < 0.0001){
+          brushSize = 0.0001;
+        }
+        mesh.geometry.attributes.color.needsUpdate = true;
+        mesh_mouse.geometry.attributes.color.needsUpdate = true;
         break;
       default:
         break;
@@ -521,27 +471,18 @@ class Annotator extends Component {
 
   onKeyUp = e => {
     switch (e.keyCode) {
-      case 32: // space   hide segments
-        if (keySpace === 1){
-          mesh_mouse.geometry.copy(mesh.geometry);
-          mesh_mouse.geometry.attributes.color.needsUpdate = true;
-          keySpace = 0;
-          segId = -1;
-        }
-        break;
       case 81: // q       hide original mesh
-        if (keyQ === 1){
+        if (keyQ === 1) {
           mesh_mouse.geometry.copy(mesh.geometry);
           mesh_mouse.geometry.attributes.color.needsUpdate = true;
           keyQ = 0;
-          segId = -1;
         }
         break;
-      case 67: // c hide the changes over the preannotations
-        if (keyC === 1){
+      /*case 67: // c hide the changes over the preannotations
+        if (keyC === 1) {
           mesh.geometry.copy(mesh_hid.geometry);
-          for (let className in annotations["classes"]){
-            for (let i=0; i < annotations["classes"][className].length; i++){
+          for (let className in annotations["classes"]) {
+            for (let i = 0; i < annotations["classes"][className].length; i++) {
               mesh = meshService.addSegmentColor(Number(annotations["classes"][className][i]), mesh, color_list[className]);
             }
           }
@@ -553,10 +494,10 @@ class Annotator extends Component {
         }
         break;
       case 71: // g hide instances that are wrong in preannotation
-        if (keyG === 1){
+        if (keyG === 1) {
           mesh.geometry.copy(mesh_hid.geometry);
-          for (let className in annotations["classes"]){
-            for (let i=0; i < annotations["classes"][className].length; i++){
+          for (let className in annotations["classes"]) {
+            for (let i = 0; i < annotations["classes"][className].length; i++) {
               mesh = meshService.addSegmentColor(Number(annotations["classes"][className][i]), mesh, color_list[className]);
             }
           }
@@ -566,7 +507,7 @@ class Annotator extends Component {
           keyG = 0;
           segId = -1;
         }
-        break;
+        break;*/
       default:
         break;
     }
@@ -591,26 +532,25 @@ class Annotator extends Component {
   addInstance = e => {
     let prev_sem = selected_sem;
     let splitted_id = e.target.id.split('_');
-    selected_sem = semantics[splitted_id[splitted_id.length-1] - 1];
+    selected_sem = semantics[splitted_id[splitted_id.length - 1] - 1];
     this.classSelectionStyles(prev_sem, selected_sem);
 
-    if ((class_selected === false)){
-      segId = -1;
+    if ((class_selected === false)) {
       class_selected = true;
     }
   };
 
   classSelectionStyles = (prev_class, curr_class) => {
-    if (prev_class !== undefined){
+    if (prev_class !== undefined) {
       document.getElementById("sem_text_" + prev_class.id).style.backgroundColor = "transparent";
     }
-    if (curr_class !== undefined){
+    if (curr_class !== undefined) {
       document.getElementById("sem_text_" + curr_class.id).style.backgroundColor = this.RGBTohex(curr_class.color);
     }
   }
 
   saveAnnotation = async () => {
-    if (!this.state.timerActive){
+    if (!this.state.timerActive) {
       this.setState({
         timerActive: true
       });
@@ -623,7 +563,7 @@ class Annotator extends Component {
     if (response !== "OK")
       alert(response);
   };
-  
+
   clearAnnotation = () => {
     // clear current annotations
     annotations = labelService.clearAnnotation();
@@ -645,27 +585,24 @@ class Annotator extends Component {
     mesh.geometry.copy(mesh_hid.geometry);
     mesh_mouse.geometry.copy(mesh.geometry);
     mesh.geometry.attributes.color.needsUpdate = true;
-    mesh_overseg.geometry.attributes.color.needsUpdate = true;
     mesh_mouse.geometry.attributes.color.needsUpdate = true;
 
     // reset annotation states
-    segId = -1;
-    segId_new = -1;
     class_selected = false;
     class_selected_lastLabeled = false;
     segId2Color = undefined;
     oversegId2Color = undefined;
     to_fix_idx = [];
-    to_fix_percent = 0;
+    /*to_fix_percent = 0;
     to_fix_count = 0;
     tp_count = 0;
     fp_count = 0;
-    fn_count = 0;
+    fn_count = 0;*/
     this.classSelectionStyles(selected_sem, undefined);
   };
 
   RGBTohex = rgb => {
-    var [r,g,b] = rgb;
+    var [r, g, b] = rgb;
     r = r.toString(16).toUpperCase();
     g = g.toString(16).toUpperCase();
     b = b.toString(16).toUpperCase();
@@ -678,24 +615,12 @@ class Annotator extends Component {
     return "#" + r.toString(16) + g.toString(16) + b.toString(16);
   };
 
-  updateFixNeeded = () => {
-    let tps = 0;
-    annotations["changes"].instance_count.forEach(element => {
-      if (to_fix_idx.indexOf(element) !== -1){
-        tps += 1;
-      }
-    });
-    tp_count = tps;
-    fp_count = annotations["changes"].instance_count.size - tp_count;
-    fn_count = to_fix_idx.length - tp_count;
-  }
-
   handleClassSelect = e => {
     let splitted_id = e.target.id.split('_');
-    selected_sem = semantics[splitted_id[splitted_id.length-1] - 1]
+    selected_sem = semantics[splitted_id[splitted_id.length - 1] - 1]
   };
 
-  updateTime = ({duration, progress, time}) => {
+  updateTime = ({ duration, progress, time }) => {
     annotations = labelService.updateTime(time);
   }
 
@@ -707,31 +632,31 @@ class Annotator extends Component {
           className="row p-2"
           style={{ height: 0.12 * window.innerHeight }}
         >
-          
+
           <div className="col"></div>
           <div className="col">
             <div className="row">
-              <span style={{fontSize: "15px"}}><font style={{ color: "orange" }}>Number of instances to fix</font>: {to_fix_count}</span>
-              &nbsp;&nbsp; <span style={{fontSize: "15px"}}><font style={{ color: "orange" }}>Percent of instances to fix</font>: {to_fix_percent.toFixed(4).toString() + '%'}</span>
+              {/*<span style={{fontSize: "15px"}}><font style={{ color: "orange" }}>Number of instances to fix</font>: {to_fix_count}</span>
+              &nbsp;&nbsp; <span style={{fontSize: "15px"}}><font style={{ color: "orange" }}>Percent of instances to fix</font>: {to_fix_percent.toFixed(4).toString() + '%'}</span>*/}
             </div>
             <div className="row">
-            <p>
-              <span style={{fontSize: "15px"}}><font style={{ color: "orange" }}>Fixed / Needed to fix</font>: {tp_count}</span>
-              &nbsp;&nbsp; <span style={{fontSize: "15px"}}><font style={{ color: "orange" }}>Fixed / Not needed to fix</font>: {fp_count}</span>
-            </p>
+              <p>
+                {/*<span style={{fontSize: "15px"}}><font style={{ color: "orange" }}>Fixed / Needed to fix</font>: {tp_count}</span>
+              &nbsp;&nbsp; <span style={{fontSize: "15px"}}><font style={{ color: "orange" }}>Fixed / Not needed to fix</font>: {fp_count}</span>*/}
+              </p>
             </div>
             <div className="row">
-              <span style={{fontSize: "15px"}}><font style={{ color: "orange" }}>Not fixed / Needed to fix</font>: {fn_count}</span>
+              {/*<span style={{fontSize: "15px"}}><font style={{ color: "orange" }}>Not fixed / Needed to fix</font>: {fn_count}</span>*/}
             </div>
           </div>
           <div className="col">
             <div className="row">
               <div className="col"></div>
-                  <div className="col">
-                    <Timer active={this.state.timerActive} duration={null} onTimeUpdate={this.updateTime} time={this.state.startTime}>
-                      <Timecode component={(props) => {return <span style={{fontSize: "20px"}}><font style={{ color: "orange"}}>Time</font>: {props.children[0]}</span>}}/>
-                    </Timer>
-                  </div>
+              <div className="col">
+                <Timer active={this.state.timerActive} duration={null} onTimeUpdate={this.updateTime} time={this.state.startTime}>
+                  <Timecode component={(props) => { return <span style={{ fontSize: "20px" }}><font style={{ color: "orange" }}>Time</font>: {props.children[0]}</span> }} />
+                </Timer>
+              </div>
               <div className="col"></div>
             </div>
           </div>
@@ -755,7 +680,7 @@ class Annotator extends Component {
               width: 0.149 * window.innerWidth,
               height: 0.833 * window.innerHeight
             }}
-          > 
+          >
             <div className="row m-2">
               <legend className="row col-form-label ">Scenes:</legend>
               <select id="scenesDrop" className="form-control" onChange={this.onFrameUpdate}>
@@ -770,7 +695,7 @@ class Annotator extends Component {
 
                 ))}
               </select>
-            </div> 
+            </div>
 
             <div className="row sm-12">
               <legend className="row col-form-label ">Semantic:</legend>
@@ -811,26 +736,26 @@ class Annotator extends Component {
                 </div>
               </div>
             </div>
-            <div className="col" 
+            <div className="col"
               style={{
-                  width: 0.20 * window.innerWidth,
-                  height: 0.03 * window.innerHeight
-                }}>
+                width: 0.20 * window.innerWidth,
+                height: 0.03 * window.innerHeight
+              }}>
             </div>
-            <div className="col" 
+            <div className="col"
               style={{
-                  width: 0.20 * window.innerWidth,
-                  height: 0.07 * window.innerHeight
-                }}>
-              <div className="row justify-content-start" 
+                width: 0.20 * window.innerWidth,
+                height: 0.07 * window.innerHeight
+              }}>
+              <div className="row justify-content-start"
                 style={{
                   width: 0.20 * window.innerWidth,
                   height: 0.01 * window.innerHeight
                 }}>
                 <button className="btn btn-dark" onClick={this.clearAnnotation}
-                style={{
-                  width: 0.12 * window.innerWidth
-                }}>
+                  style={{
+                    width: 0.12 * window.innerWidth
+                  }}>
                   Clear Annos
                 </button>
               </div>
@@ -853,7 +778,6 @@ class Annotator extends Component {
           </div>
           <div className="col">
             <p>
-              <font style={{ color: "orange" }}>SegId</font>: {segId_new}
               &nbsp;&nbsp; <font style={{ color: "orange" }}>Sem</font>: {mouse_semantic}
             </p>
           </div>
