@@ -8,6 +8,7 @@ import { PointLight } from "three/src/lights/PointLight.js";
 import Stats from "three/examples/jsm/libs/stats.module.js";
 import Timer from "react-timer-wrapper";
 import Timecode from "react-timecode";
+//import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from "three-mesh-bvh";
 
 import $ from "jquery";
 
@@ -17,6 +18,11 @@ import configs from "../configs.json";
 import LabelService from "../services/LabelService";
 import MeshService from "../services/MeshService";
 import StateService from "../services/StateService";
+
+//THREE.Mesh.prototype.raycast = acceleratedRaycast;
+//THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+//THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+
 let labelService = LabelService.getInstance();
 let meshService = MeshService.getInstance();
 let stateService = StateService.getInstance();
@@ -30,14 +36,15 @@ var Marked = 0;
 
 // define variables
 var camera, controls, light, scene, stats, renderer, loader;
-var mesh, mesh_hid, mesh_mouse;
+var mesh, mesh_hid, mesh_mouse, cylinder, radius, height;
 var segId2Color, oversegId2Color;
 
 // initialize raycaster
 var raycaster = new THREE.Raycaster();
 raycaster.params.Points.threshold = 0.01;
+//raycaster.firstHitOnly = true;
 var mouse = new THREE.Vector2();
-var meshes, pointSelectIndex, brushSize = 0.001, brushStep = 0.0001;
+var meshes, pointSelectIndex;
 
 // initialize annotation states
 var pointId = -1;
@@ -104,7 +111,7 @@ class Annotator extends Component {
     this.mount.appendChild(renderer.domElement);
 
     // camera
-    camera = new THREE.PerspectiveCamera(65, width / height, 1, 1000);
+    camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 50);
     camera.position.set(2, 2, 2);
     camera.up.set(0, 0, 1);
 
@@ -127,6 +134,11 @@ class Annotator extends Component {
     // mesh
     this.addMesh();
     // stats
+    let cylinderGeometry = new THREE.CylinderGeometry(0.025, 0.025, 0.5, 32, 32);
+    let cylinderMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+    cylinder = new THREE.Mesh(cylinderGeometry, cylinderMaterial);
+    scene.add(cylinder);
+
     stats = new Stats();
 
     window.addEventListener("resize", this.onWindowResize, false);
@@ -163,9 +175,9 @@ class Annotator extends Component {
   };
 
   addMesh = async () => {
-    mesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.Material());
+    mesh = new THREE.Points(new THREE.BufferGeometry(), new THREE.PointsMaterial({ size: 0.01, vertexColors: THREE.VertexColors }));
     mesh_hid = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.Material());
-    mesh_mouse = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.Material());
+    mesh_mouse = new THREE.Points(new THREE.BufferGeometry(), new THREE.PointsMaterial({ size: 0.01, vertexColors: THREE.VertexColors }));
     loader = new PLYLoader();
     let load_message_annots = await labelService.loadAnnotationJson(selected_filename);
     if (load_message_annots[0] !== "OK") {
@@ -205,6 +217,9 @@ class Annotator extends Component {
         geometry.translate(-((geometry.boundingBox.max.x - geometry.boundingBox.min.x) / 2 + geometry.boundingBox.min.x), -((geometry.boundingBox.max.y - geometry.boundingBox.min.y) / 2 + geometry.boundingBox.min.y), -1);
 
         // geometry
+        mesh.geometry.index = null;
+        mesh_mouse.geometry.index = null;
+
         mesh.geometry.copy(geometry);
         mesh_hid.geometry.copy(geometry);
 
@@ -217,7 +232,7 @@ class Annotator extends Component {
         mesh_mouse.geometry.copy(mesh.geometry);
 
         // material
-        var material = new THREE.MeshPhongMaterial({ color: 0xffffff, specular: 0x010101, shininess: 100, flatShading: true, vertexColors: THREE.VertexColors });
+        /*var material = new THREE.MeshPhongMaterial({ color: 0xffffff, specular: 0x010101, shininess: 100, flatShading: true, vertexColors: THREE.VertexColors });
         mesh.material = material;
         mesh_mouse.material = material;
 
@@ -225,7 +240,7 @@ class Annotator extends Component {
         mesh_mouse.castShadow = true;
 
         mesh.receiveShadow = true;
-        mesh_mouse.receiveShadow = true;
+        mesh_mouse.receiveShadow = true;*/
 
         scene.add(mesh_mouse);
         meshes = [mesh];
@@ -274,36 +289,19 @@ class Annotator extends Component {
 
     // calculate objects intersecting the picking ray
     if (typeof mesh.geometry.attributes.position !== "undefined") {
-      var intersections = raycaster.intersectObjects(meshes);
+      var intersections = raycaster.intersectObject(mesh, true);
       if (intersections.length > 0) {
 
         // get intersected face
+        const inverseMatrix = new THREE.Matrix4();
+        const intersectionPoint = new THREE.Vector3();
+        inverseMatrix.copy(mesh_mouse.matrixWorld);
         var intersection = intersections[0];
-        var face = intersection.face;
-
-        // get face vertices
-        var v1 = [mesh_mouse.geometry.attributes.position.getX(face.a), mesh_mouse.geometry.attributes.position.getY(face.a), mesh_mouse.geometry.attributes.position.getZ(face.a)];
-        var v2 = [mesh_mouse.geometry.attributes.position.getX(face.b), mesh_mouse.geometry.attributes.position.getY(face.b), mesh_mouse.geometry.attributes.position.getZ(face.b)];
-        var v3 = [mesh_mouse.geometry.attributes.position.getX(face.c), mesh_mouse.geometry.attributes.position.getY(face.c), mesh_mouse.geometry.attributes.position.getZ(face.c)];
-
-        // choose the nearest vertice
-        var dist1 = (v1[0] - intersection.point.x) ^ 2 + (v1[1] - intersection.point.y) ^ 2 + (v1[2] - intersection.point.z) ^ 2;
-        var dist2 = (v2[0] - intersection.point.x) ^ 2 + (v2[1] - intersection.point.y) ^ 2 + (v2[2] - intersection.point.z) ^ 2;
-        var dist3 = (v3[0] - intersection.point.x) ^ 2 + (v3[1] - intersection.point.y) ^ 2 + (v3[2] - intersection.point.z) ^ 2;
-        var dist_min = dist1;
-        pointSelectIndex = face.a;
-        if (dist_min > dist2) {
-          dist_min = dist2;
-          pointSelectIndex = face.b;
-        }
-        if (dist_min > dist3) {
-          dist_min = dist3;
-          pointSelectIndex = face.c;
-        }
-        this.setState({
-          point: intersection.point
-        });
-
+        intersectionPoint.copy(intersection.point);
+        console.log(inverseMatrix);
+        cylinder.position.copy(intersection.point);
+        cylinder.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), raycaster.ray.direction.normalize());
+        pointSelectIndex = intersection.index
         // show intersected segment in mesh
         /*segId_new = meshService.index2segId(pointSelectIndex);
         if (segId_new !== segId) {
@@ -330,12 +328,12 @@ class Annotator extends Component {
 
         mouse_semantic = labelService.getInfo(segId_new);*/
         if (pointSelectIndex !== pointId) {
-          let color = [255, 0, 0];
           if (Object.keys(curr_selected_pts).length !== 0) {
-            mesh_mouse = meshService.removeBrushColor(curr_selected_pts, mesh_mouse)
+            mesh = meshService.removeBrushColor(curr_selected_pts, mesh)
           }
-          [mesh_mouse, curr_selected_pts] = meshService.addBrushColor(pointSelectIndex, mesh_mouse, color, brushSize);
+          curr_selected_pts = meshService.addBrushColor(intersectionPoint, cylinder, mesh, raycaster.ray.direction.clone().normalize());
           pointId = pointSelectIndex;
+          mesh_mouse.geometry.copy(mesh.geometry);
           mesh_mouse.geometry.attributes.color.needsUpdate = true;
         }
         mouse_semantic = labelService.getInfo(annotations["annots"][pointSelectIndex], semantics);
@@ -350,6 +348,7 @@ class Annotator extends Component {
     // (-1 to +1) for both components
     if ((e.altKey) && (class_selected === true)) {
       let color = color_list[selected_sem.label];
+      console.log(selected_sem.label);
       [annotations, curr_selected_pts] = labelService.addAnnotation(selected_sem.id, curr_selected_pts, color);
       //mesh = meshService.addSegmentColor(segId, mesh, color);
       //mesh_overseg = meshService.addSegmentColor(segId, mesh_overseg, color);
@@ -365,7 +364,6 @@ class Annotator extends Component {
       }
 
       //console.log(fp_count);
-      this.saveAnnotation();
     }
     e.preventDefault();
     mouse.x = ((e.clientX + 5) / this.mount.clientWidth) * 2 - 1;
@@ -436,33 +434,50 @@ class Annotator extends Component {
       case 122: // z      remove annotated segment
         // remove annotation
         [annotations, curr_selected_pts] = labelService.removeAnnotation(curr_selected_pts, mesh_hid)
-        // update mesh
-        /*mesh.geometry.copy(mesh_hid.geometry);
-        for (let className in annotations["classes"]) {
-          for (let i = 0; i < annotations["classes"][className].length; i++) {
-            mesh = meshService.addSegmentColor(Number(annotations["classes"][className][i]), mesh, color_list[className]);
-          }
-        }
-        mesh_mouse.geometry.copy(mesh.geometry);
-        mesh.geometry.attributes.color.needsUpdate = true;
-        mesh_mouse.geometry.attributes.color.needsUpdate = true;*/
-        this.saveAnnotation();
         break;
       case 43: // + increase the brush size
-        brushSize += brushStep;
-        if (brushSize > 1){
-          brushSize = 1;
-        }
-        mesh.geometry.attributes.color.needsUpdate = true;
-        mesh_mouse.geometry.attributes.color.needsUpdate = true;
+        radius = cylinder.geometry.parameters.radiusTop;
+        height = cylinder.geometry.parameters.height
+        cylinder.geometry.dispose();
+        cylinder.geometry = new THREE.CylinderGeometry(radius * 1.02, radius * 1.02, height, 32, 32);
+        this.renderScene();
         break;
       case 45: // - decrease the brush size
-        brushSize -= brushStep;
-        if (brushSize < 0.0001){
-          brushSize = 0.0001;
-        }
-        mesh.geometry.attributes.color.needsUpdate = true;
-        mesh_mouse.geometry.attributes.color.needsUpdate = true;
+        radius = cylinder.geometry.parameters.radiusTop;
+        height = cylinder.geometry.parameters.height
+        cylinder.geometry.dispose();
+        cylinder.geometry = new THREE.CylinderGeometry(radius * 0.98, radius * 0.98, height, 32, 32);
+        this.renderScene();
+        break;
+      case 112: // p increase the brush depth
+        radius = cylinder.geometry.parameters.radiusTop;
+        height = cylinder.geometry.parameters.height
+        cylinder.geometry.dispose();
+        cylinder.geometry = new THREE.CylinderGeometry(radius, radius, height * 1.02, 32, 32);
+        this.renderScene();
+        break;
+      case 109: // m decrease the brush depth
+        radius = cylinder.geometry.parameters.radiusTop;
+        height = cylinder.geometry.parameters.height
+        cylinder.geometry.dispose();
+        cylinder.geometry = new THREE.CylinderGeometry(radius, radius, height * 0.98, 32, 32);
+        this.renderScene();
+        break;
+      case 105: // i increase point size
+        console.log(mesh_mouse.material.size);
+        mesh_mouse.material.size = mesh_mouse.material.size * 1.2;
+        mesh.material.size *= 1.2;
+        mesh_hid.material.size *= 1.2;
+        console.log(mesh_mouse.material.size);
+        this.renderScene();
+        break;
+      case 100: // d decrease point size
+        console.log(mesh_mouse.material.size);
+        mesh_mouse.material.size /= 1.2;
+        mesh.material.size /= 1.2;
+        mesh_hid.material.size /= 1.2;
+        console.log(mesh_mouse.material.size);
+        this.renderScene();
         break;
       default:
         break;
@@ -470,6 +485,7 @@ class Annotator extends Component {
   };
 
   onKeyUp = e => {
+    console.log(e);
     switch (e.keyCode) {
       case 81: // q       hide original mesh
         if (keyQ === 1) {
@@ -477,6 +493,14 @@ class Annotator extends Component {
           mesh_mouse.geometry.attributes.color.needsUpdate = true;
           keyQ = 0;
         }
+        break;
+      case 18: // release alt save annotations
+        if (class_selected === true) {
+          this.saveAnnotation();
+        }
+        break
+      case 90: // release z save removed annots
+        this.saveAnnotation();
         break;
       /*case 67: // c hide the changes over the preannotations
         if (keyC === 1) {

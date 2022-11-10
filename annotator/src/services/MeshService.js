@@ -1,4 +1,5 @@
 import $ from "jquery";
+import * as THREE from "three";
 
 class MeshService {
   static myInstance = null;
@@ -19,26 +20,28 @@ class MeshService {
     return filenames;
   };
 
-  addBrushColor = (pointId, mesh_mouse, color, brushSize) => {
-    let point_x = mesh_mouse.geometry.attributes.position.getX(pointId);
-    let point_y = mesh_mouse.geometry.attributes.position.getY(pointId);
-    let point_z = mesh_mouse.geometry.attributes.position.getZ(pointId);
-    var dist = 0, selected_pts = {};
+  addBrushColor = (point, cylinder, mesh_mouse, rayDirection) => {
+    var selected_pts = {};
     for (let i = 0; i < mesh_mouse.geometry.attributes.position.count; i++) {
       let x = mesh_mouse.geometry.attributes.position.getX(i);
       let y = mesh_mouse.geometry.attributes.position.getY(i);
       let z = mesh_mouse.geometry.attributes.position.getZ(i);
-      dist = (point_x - x) * (point_x - x) + (point_y - y) * (point_y - y) + (point_z - z) * (point_z - z);
-      if (dist <= brushSize) {
+      let currPt = new THREE.Vector3(x, y, z);
+      let minLoc = rayDirection.dot(currPt.sub(point));
+      if (minLoc === Infinity || minLoc === -Infinity) {
+        continue;
+      }
+      let minPt = rayDirection.multiplyScalar(minLoc);
+      let dist = currPt.distanceTo(minPt);
+      if (minLoc >= -0.5 && minLoc <= cylinder.geometry.parameters.height && dist <= cylinder.geometry.parameters.radiusTop) {
         selected_pts[i] = [
           mesh_mouse.geometry.attributes.color.getX(i),
           mesh_mouse.geometry.attributes.color.getY(i),
           mesh_mouse.geometry.attributes.color.getZ(i)
         ];
-        mesh_mouse.geometry.attributes.color.setXYZ(i, color[0], color[1], color[2]);
       }
     }
-    return [mesh_mouse, selected_pts];
+    return selected_pts;
   }
 
   removeBrushColor = (selected_pts, mesh_mouse) => {
